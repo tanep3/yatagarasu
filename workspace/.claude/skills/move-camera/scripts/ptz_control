@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""
+Tapo TC70 カメラ PTZ 制御スクリプト
+
+Pytapoを使用してTapoカメラのPTZ（Pan-Tilt-Zoom）制御を行います。
+
+使用例:
+    ptz_control --left          # 左に45度回転
+    ptz_control --right         # 右に45度回転
+    ptz_control --up            # 上に30度向ける
+    ptz_control --down          # 下に30度向ける
+    ptz_control --move 100 50   # 角度指定で相対移動
+    ptz_control --calibrate     # キャリブレーション
+"""
+
+import os
+import sys
+import argparse
+from pathlib import Path
+
+# .envファイルから環境変数を読み込む
+def load_env_file():
+    """workspace/.envファイルから環境変数を読み込む"""
+    # ptz_controlは workspace/.claude/skills/move-camera/scripts/ にある
+    # そこから workspace/.env へのパスを計算:
+    # scripts/ -> move-camera/ -> skills/ -> .claude/ -> workspace/
+    script_dir = Path(__file__).parent
+    workspace_env = script_dir.parent.parent.parent.parent / '.env'
+    if workspace_env.exists():
+        with open(workspace_env) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key not in os.environ:  # 既存の環境変数を上書きしない
+                        os.environ[key] = value
+    else:
+        # .envが見つからない場合のデバッグ情報
+        print(f"警告: .envファイルが見つかりません: {workspace_env}", file=sys.stderr)
+
+load_env_file()
+
+# Pytapoのインポート
+try:
+    from pytapo import Tapo
+except ImportError:
+    print("エラー: Pytapoがインストールされていません", file=sys.stderr)
+    print("インストール: uv pip install pytapo", file=sys.stderr)
+    sys.exit(1)
+
+
+def get_camera_config():
+    """カメラ設定を環境変数またはデフォルト値から取得"""
+    return {
+        'host': os.getenv('TAPO_HOST', '192.168.0.132'),
+        'user': os.getenv('TAPO_USER', 'admin'),
+        'password': os.getenv('TAPO_PASSWORD', ''),
+    }
+
+
+def connect_camera(config):
+    """カメラに接続"""
+    try:
+        tapo = Tapo(config['host'], config['user'], config['password'])
+        return tapo
+    except Exception as e:
+        print(f"エラー: カメラに接続できませんでした: {e}", file=sys.stderr)
+        print(f"ホスト: {config['host']}", file=sys.stderr)
+        print(f"ユーザー: {config['user']}", file=sys.stderr)
+        sys.exit(1)
+
+
+def move_motor(tapo, x, y):
+    """モーターを指定座標に移動"""
+    try:
+        result = tapo.moveMotor(x, y)
+        print(f"移動しました: x={x}, y={y}")
+        return result
+    except Exception as e:
+        print(f"エラー: 移動に失敗しました: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+
+
+def move_horizontal(tapo):
+    """水平移動（パン）"""
+    try:
+        result = tapo.moveMotorHorizontal()
+        print("水平移動しました")
+        return result
+    except Exception as e:
+        print(f"エラー: 水平移動に失敗しました: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def move_vertical(tapo):
+    """垂直移動（チルト）"""
+    try:
+        result = tapo.moveMotorVertical()
+        print("垂直移動しました")
+        return result
+    except Exception as e:
+        print(f"エラー: 垂直移動に失敗しました: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def calibrate_motor(tapo):
+    """モーターキャリブレーション"""
+    try:
+        result = tapo.calibrateMotor()
+        print("キャリブレーションを開始しました")
+        return result
+    except Exception as e:
+        print(f"エラー: キャリブレーションに失敗しました: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def get_motor_capability(tapo):
+    """モーター能力を取得"""
+    try:
+        result = tapo.getMotorCapability()
+        print(f"モーター能力: {result}")
+        return result
+    except Exception as e:
+        print(f"エラー: モーター能力の取得に失敗しました: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='Tapo TC70 カメラ PTZ 制御',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用例:
+  %(prog)s --left                  # 左に45度回転（move -45 0）
+  %(prog)s --right                 # 右に45度回転（move 45 0）
+  %(prog)s --up                    # 上に30度向ける（move 0 30）
+  %(prog)s --down                  # 下に30度向ける（move 0 -30）
+  %(prog)s --move 100 50           # 現在値から座標指定で差分移動
+  %(prog)s --calibrate             # キャリブレーション
+  %(prog)s --capability            # モーター能力を取得
+
+環境変数:
+  TAPO_HOST      カメラのIPアドレス (デフォルト: 192.168.0.132)
+  TAPO_USER      ユーザー名 (デフォルト: admin)
+  TAPO_PASSWORD  パスワード (必須)
+        """
+    )
+
+    # 方向オプション
+    direction_group = parser.add_mutually_exclusive_group()
+    direction_group.add_argument('--left', action='store_true', help='左に45度回転')
+    direction_group.add_argument('--right', action='store_true', help='右に45度回転')
+    direction_group.add_argument('--up', action='store_true', help='上に30度向ける')
+    direction_group.add_argument('--down', action='store_true', help='下に30度向ける')
+
+    # その他のオプション
+    parser.add_argument('--move', nargs=2, metavar=('X', 'Y'), type=int,
+                       help='角度指定で相対移動 (例: --move 100 50)')
+    parser.add_argument('--calibrate', action='store_true',
+                       help='モーターキャリブレーション')
+    parser.add_argument('--capability', action='store_true',
+                       help='モーター能力を取得')
+
+    # 接続オプション
+    parser.add_argument('--host', metavar='HOST',
+                       help='カメラのIPアドレス (環境変数 TAPO_HOST)')
+    parser.add_argument('--user', metavar='USER',
+                       help='ユーザー名 (環境変数 TAPO_USER)')
+    parser.add_argument('--password', metavar='PASSWORD',
+                       help='パスワード (環境変数 TAPO_PASSWORD)')
+
+    args = parser.parse_args()
+
+    # 少なくとも1つのアクションを指定
+    if not any([args.left, args.right, args.up, args.down, args.move,
+                args.calibrate, args.capability]):
+        parser.print_help()
+        sys.exit(1)
+
+    # カメラ設定を取得
+    config = get_camera_config()
+
+    # コマンドライン引数で上書き
+    if args.host:
+        config['host'] = args.host
+    if args.user:
+        config['user'] = args.user
+    if args.password:
+        config['password'] = args.password
+
+    # パスワードチェック
+    if not config['password']:
+        print("エラー: パスワードが設定されていません", file=sys.stderr)
+        print("環境変数 TAPO_PASSWORD または --password オプションで設定してください", file=sys.stderr)
+        sys.exit(1)
+
+    # カメラに接続
+    tapo = connect_camera(config)
+
+    # アクションを実行
+    if args.calibrate:
+        calibrate_motor(tapo)
+    elif args.capability:
+        get_motor_capability(tapo)
+    elif args.move:
+        x, y = args.move
+        move_motor(tapo, x, y)
+    elif args.left:
+        move_motor(tapo, -45, 0)   # 左に45度回転（x=-45, y=0）
+    elif args.right:
+        move_motor(tapo, 45, 0)    # 右に45度回転（x=45, y=0）
+    elif args.up:
+        move_motor(tapo, 0, 30)    # 上に30度向ける（x=0, y=30）
+    elif args.down:
+        move_motor(tapo, 0, -30)   # 下に30度向ける（x=0, y=-30）
+
+
+if __name__ == "__main__":
+    main()

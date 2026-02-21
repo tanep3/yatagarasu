@@ -1,0 +1,3 @@
+[submodule "external/SemanticMemory"]
+	path = external/SemanticMemory
+	url = https://github.com/tanep3/SemanticMemory.git

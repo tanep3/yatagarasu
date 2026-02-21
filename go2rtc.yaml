@@ -1,0 +1,8 @@
+streams:
+  tapo_tc70:  # カメラのストリーム定義
+    - rtsp://ユーザー名:パスワード@TC70のIP:554/stream1  # 高画質映像+音声（映像はオプション）
+    - tapo://TP-Linkアプリのパスワード@TC70のIP  # Tapoプロトコルで双方向音声有効
+
+webrtc:  # WebRTCでスピーカー制御（ブラウザからテスト可能）
+  candidates:
+    - stun.l.google.com:19302  # STUNサーバー
