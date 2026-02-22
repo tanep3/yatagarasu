@@ -266,7 +266,7 @@ check_input_enc() {
         file_name="$1"
     else
         # テキストの場合はそのまま一時ファイルに保存
-        echo "$input" > "$temp_file"
+        printf '%s\n' "$input" > "$temp_file"
         file_name="temp_file"
     fi
     # エンコーディングを判定
@@ -276,14 +276,14 @@ check_input_enc() {
     fi
     input_encoding=$(file "$param" "$file_name" | awk -F "=" '{print $2}')
     if [ $? -ne 0 ]; then
-        echo "エラー: 入力の文字コード情報の取得に失敗しました。" >&2
+        printf 'エラー: 入力の文字コード情報の取得に失敗しました。\n' >&2
         trap "rm -rf '$TEMP_DIR'" EXIT
         exit 1
     fi
     # 一時ファイルを削除
     rm -f "$temp_file"
     # エンコーディング情報を出力
-    echo "$input_encoding"
+    printf '%s\n' "$input_encoding"
 }
 
 # 必要に応じてUTF-8に変換
@@ -304,14 +304,14 @@ to_utf8() {
         if [ -f "$1" ]; then
             (iconv -f "$INPUT_ENCODING" -t "utf-8" "$1")
             if [ $? -ne 0 ]; then
-                echo "エラー: 入力の文字コード変換に失敗しました。" >&2
+                printf 'エラー: 入力の文字コード変換に失敗しました。\n' >&2
                 rm -f "$TEXTS"
                 exit 1
             fi
         else
-            echo "$(echo "$1" | iconv -f "$INPUT_ENCODING" -t "utf-8")"
+            printf '%s\n' "$(printf '%s' "$1" | iconv -f "$INPUT_ENCODING" -t "utf-8")"
             if [ $? -ne 0 ]; then
-                echo "エラー: 入力の文字コード変換に失敗しました。" >&2
+                printf 'エラー: 入力の文字コード変換に失敗しました。\n' >&2
                 trap "rm -rf '$TEMP_DIR'" EXIT
                 exit 1
             fi
@@ -321,7 +321,7 @@ to_utf8() {
         if [ -f "$1" ]; then
             cat "$1"
         else
-            echo "$1"
+            printf '%s\n' "$1"
         fi
     fi
 }

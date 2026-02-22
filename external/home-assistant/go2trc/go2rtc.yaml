@@ -2,6 +2,11 @@ streams:
   tapo_tc70:  # カメラのストリーム定義
     - rtsp://ユーザー名:パスワード@TC70のIP:554/stream1  # 高画質映像+音声（映像はオプション）
     - tapo://TP-Linkアプリのパスワード@TC70のIP  # Tapoプロトコルで双方向音声有効
+    - ffmpeg:tapo_tc70#video=copy#audio=aac    # オーディオ対応（必要なら）
+
+# 双方向オーディオ用（マイク入力もTC70経由で）
+api:
+  listen: ":8555"
 
 webrtc:  # WebRTCでスピーカー制御（ブラウザからテスト可能）
   candidates:

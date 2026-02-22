@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+
+# 使用例:
+#   1. ファイル指定
+#      tapovoice -i ~/work/hello.wav
+#      tapovoice --input /path/to/audio.wav -d livingroom_cam
+#
+#   2. 標準入力（zundaなど）
+#      zunda "こんにちはわたしはたねちゃん" --stdout | tapovoice
+#      zunda "こんにちは" --stdout | tapovoice -d tapo_bedroom
+#
+#   3. 両方指定
+#      ./tapovoice -i audio.wav -d tapo_kitchen
+
+set -euo pipefail
+
+# デフォルト値
+STREAM_NAME="tapo_tc70"
+INPUT_FILE=""
+GO2RTC_HOST="localhost:1984"            # go2rtcのWeb APIホスト:ポート（必要なら変更）
+
+# 引数解析
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -i|--input)
+      INPUT_FILE="$2"
+      shift 2
+      ;;
+    -d|--device)
+      STREAM_NAME="$2"
+      shift 2
+      ;;
+    *)
+      echo "不明なオプション: $1" >&2
+      echo "使い方: $0 [-i/--input <ファイル>] [-d/--device <ストリーム名>]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+# 一時ファイル（そのまま使うので拡張子wav）
+TMP_WAV="/tmp/tapo_audio_$$.wav"
+
+# 入力ソースの決定
+if [ -n "$INPUT_FILE" ]; then
+  # ファイル指定あり → コピー
+  if [ ! -f "$INPUT_FILE" ]; then
+    echo "エラー: ファイルが見つかりません → $INPUT_FILE" >&2
+    exit 1
+  fi
+  cp "$INPUT_FILE" "$TMP_WAV"
+#  echo "入力ファイルから読み込み: $INPUT_FILE"
+else
+  # 標準入力から受け取る
+  cat > "$TMP_WAV"
+#  echo "標準入力（stdin）からWAVを受け取りました"
+fi
+
+# ファイルサイズチェック
+if [ ! -s "$TMP_WAV" ]; then
+  echo "エラー: 入力音声が空です（zundaの出力やファイルをチェックしてください）" >&2
+  rm -f "$TMP_WAV"
+  exit 1
+fi
+
+# go2rtc APIにPOST（audio=pcma でpcm_alawを指定）
+SRC="ffmpeg:$TMP_WAV#audio=pcma"
+DST="$STREAM_NAME"
+
+# URLエンコード（jqがあればjq、なければsedで最低限のエンコード）
+if command -v jq >/dev/null 2>&1; then
+  ENCODED_SRC=$(printf '%s' "$SRC" | jq -sRr @uri)
+else
+  # jqがない場合、最低限のスペースと#だけエンコード（パスワード漏洩防止のためSRC全体をechoしない）
+  ENCODED_SRC=$(printf '%s' "$SRC" | sed 's/ /%20/g; s/#/\\#/g; s/&/%26/g; s/?/%3F/g')
+fi
+
+URL="http://${GO2RTC_HOST}/api/streams?dst=${DST}&src=${ENCODED_SRC}"
+
+# echo "go2rtcに送信中... $URL"
+
+# POSTリクエスト
+curl -s -X POST "$URL" >/dev/null 2>&1 || {
+  echo "エラー: go2rtc APIへのPOSTに失敗しました（go2rtcが起動していますか？ ポート1984を確認してね）" >&2
+  rm -f "$TMP_WAV"
+  exit 1
+}
+
+# クリーンアップ
+rm -f "$TMP_WAV"
+
+echo "送信完了！ $STREAM_NAME のスピーカーから音が出るはずです♡"
+# echo "聞こえなかったら、go2rtcのログ（-debugで起動）やTapoアプリの音量を確認してみてね。"

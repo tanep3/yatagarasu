@@ -11,7 +11,7 @@ description: "Tapo TC70ロボット用の視覚スキル。go2rtc経由でカメ
 
 ## Quick Start
 
-基本的な画像取得コマンド（workspace/mediaに保存）:
+基本的な画像取得コマンド:
 
 ```bash
 SKILL_PATH/scripts/capture
@@ -34,10 +34,10 @@ SKILL_PATH/scripts/capture > image.jpg
 ### 基本的な使用法
 
 ```bash
-# workspace/mediaにタイムスタンプ付きで保存（デフォルト）
+# 保存用フォルダにタイムスタンプ付きで保存（デフォルト）
 SKILL_PATH/scripts/capture
 
-# ファイル名を指定して保存（workspace/media配下）
+# ファイル名を指定して保存
 SKILL_PATH/scripts/capture -o photo.jpg
 
 # 絶対パスで保存
@@ -92,9 +92,9 @@ STREAM=tapo_tc70 WIDTH=1280 HEIGHT=720 SKILL_PATH/scripts/capture -o hd.jpg
 
 ## Notes
 
-- 環境変数は `workspace/.env` ファイルで一元管理することを推奨します
-- 出力ファイル名を指定しない場合、`workspace/media/capture_YYYYMMDD_HHMMSS.jpg` に保存されます
-- 相対パスを指定した場合、`workspace/media/` 配下に保存されます
+- 環境変数は `<workspace>/.env` ファイルで一元管理することを推奨します
+- 出力ファイル名を指定しない場合、`<workspace>/media/capture_YYYYMMDD_HHMMSS.jpg` に保存されます
+- 相対パスを指定した場合、`<workspace>/media/` 配下に保存されます
 - 画像取得には1-2秒かかる場合があります
 - カメラの起動時間によっては、最初の数回の取得で失敗する可能性があります
 - アスペクト比は維持され、指定されたサイズ内に収まるようにリサイズされます

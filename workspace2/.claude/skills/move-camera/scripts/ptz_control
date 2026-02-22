@@ -20,14 +20,25 @@ from pathlib import Path
 
 # .envファイルから環境変数を読み込む
 def load_env_file():
-    """workspace/.envファイルから環境変数を読み込む"""
-    # ptz_controlは workspace/.claude/skills/move-camera/scripts/ にある
-    # そこから workspace/.env へのパスを計算:
-    # scripts/ -> move-camera/ -> skills/ -> .claude/ -> workspace/
-    script_dir = Path(__file__).parent
-    workspace_env = script_dir.parent.parent.parent.parent / '.env'
-    if workspace_env.exists():
-        with open(workspace_env) as f:
+    """スクリプトの位置から上に遡って.envファイルを探し、環境変数を読み込む"""
+    script_dir = Path(__file__).parent.resolve()
+    current_dir = script_dir
+    env_file = None
+
+    # 上に遡って.envを探す（最大10階層）
+    for _ in range(10):
+        potential_env = current_dir / '.env'
+        if potential_env.exists():
+            env_file = potential_env
+            break
+        # 親ディレクトリへ移動
+        current_dir = current_dir.parent
+        # ルートディレクトリに到達したら終了
+        if current_dir == current_dir.parent:
+            break
+
+    if env_file:
+        with open(env_file) as f:
             for line in f:
                 line = line.strip()
                 if line and not line.startswith('#') and '=' in line:
@@ -38,7 +49,7 @@ def load_env_file():
                         os.environ[key] = value
     else:
         # .envが見つからない場合のデバッグ情報
-        print(f"警告: .envファイルが見つかりません: {workspace_env}", file=sys.stderr)
+        print(f"警告: .envファイルが見つかりません（{script_dir}から遡って探索）", file=sys.stderr)
 
 load_env_file()
 

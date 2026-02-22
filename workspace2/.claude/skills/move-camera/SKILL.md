@@ -22,9 +22,7 @@ description: "Tapo TC70ロボット用のカメラ制御スキル。Pytapoを使
 基本的なカメラ制御コマンド:
 
 ```bash
-# .envファイルで認証情報を設定（推奨）
-cp workspace/.env.example workspace/.env
-# エディタでworkspace/.envを編集して認証情報を設定
+# <workspace>/.envファイルで認証情報を設定（推奨）
 
 # 左に回転
 SKILL_PATH/scripts/ptz_control.sh --left
@@ -105,7 +103,7 @@ SKILL_PATH/scripts/ptz_control --capability
 
 ## Notes
 
-- 環境変数は `workspace/.env` ファイルで一元管理することを推奨します
+- 環境変数は `<workspace>/.env` ファイルで一元管理することを推奨します
 - Pytapoはpythonディレクトリでuvを使ってインストールする必要があります
 - スクリプト実行時は `ptz_control.sh` ラッパー経由で実行することを推奨します
 - カメラの認証情報はTapoアプリの「詳細設定」→「カメラアカウント」で作成してください

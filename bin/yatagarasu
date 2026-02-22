@@ -1,0 +1,94 @@
+#!/bin/bash
+# Yatagarasu - 八咫烏: Claude Code ずんだもん発声スクリプト
+# Claude Codeにプロンプトを渡し、その応答をずんだもんが喋ります
+
+# デフォルト値
+MODEL="haiku"
+SPEAKER="68"
+
+# スクリプトのディレクトリを取得
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 呼び出し元のワーキングディレクトリを保存（再帰呼び出し用）
+export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
+
+# ヘルプメッセージ
+usage() {
+    echo "使用法: $0 [オプション] [テキスト]" >&2
+    echo "" >&2
+    echo "引数:" >&2
+    echo "  テキスト                 Claudeに送るプロンプト（オプション）" >&2
+    echo "                          指定しない場合は標準入力から読み込み" >&2
+    echo "" >&2
+    echo "オプション:" >&2
+    echo "  -m, --model MODEL      Claudeモデル (デフォルト: haiku)" >&2
+    echo "                         利用可能なモデル: haiku, sonnet, opus" >&2
+    echo "  -s, --speaker ID       ずんだもんスピーカーID (デフォルト: 68)" >&2
+    echo "                         主なスピーカー:" >&2
+    echo "                           46: 小夜/SAYO" >&2
+    echo "                           68: あいえるたん" >&2
+    echo "                           0: 四国めたん" >&2
+    echo "                           1: ずんだもん" >&2
+    echo "  -h, --help             このヘルプメッセージを表示" >&2
+    echo "" >&2
+    echo "使用例:" >&2
+    echo "  $0 \"今日は天気がいいから、公園とかに行くと気持ちいいかな？\"" >&2
+    echo "  $0 \"こんにちは\" -m sonnet -s 1" >&2
+    echo "  echo \"こんにちは\" | $0 -s 1" >&2
+    exit 1
+}
+
+# 引数解析
+POSITIONAL_ARGS=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -m|--model)
+            if [ -n "$2" ] && [[ "$2" != -* ]]; then
+                MODEL="$2"
+                shift 2
+            else
+                echo "エラー: -m オプションにはモデル名が必要です。" >&2
+                usage
+            fi
+            ;;
+        -s|--speaker)
+            if [ -n "$2" ] && [[ "$2" != -* ]]; then
+                SPEAKER="$2"
+                shift 2
+            else
+                echo "エラー: -s オプションにはスピーカーIDが必要です。" >&2
+                usage
+            fi
+            ;;
+        -h|--help)
+            usage
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# プロンプトの取得（優先順位: 位置引数 > 標準入力）
+if [ ${#POSITIONAL_ARGS[@]} -gt 0 ]; then
+    # 位置引数を結合
+    PROMPT="${POSITIONAL_ARGS[*]}"
+elif [ ! -t 0 ]; then
+    # 標準入力から読み込み
+    PROMPT=$(cat)
+else
+    echo "エラー: プロンプトが指定されていません。" >&2
+    echo "テキストを引数に指定するか、標準入力から渡してください。" >&2
+    usage
+fi
+
+# プロンプトが空でないかチェック
+if [ -z "$PROMPT" ]; then
+    echo "エラー: プロンプトが空です。" >&2
+    exit 1
+fi
+
+# Claude Codeの応答を取得し、ずんだもんで喋らせる
+# YATAGARASU_CWDを渡すことで、再帰呼び出し時も正しい.envを見つけられる
+YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"

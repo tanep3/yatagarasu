@@ -7,7 +7,24 @@ PYTHON_DIR="/home/tane/dev/AI/yatagarasu/python"
 
 # .envファイルから環境変数を読み込む
 load_env_file() {
-    local env_file="$(dirname "${BASH_SOURCE[0]}")/../../../../.env"
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local current_dir="$script_dir"
+    local env_file=""
+
+    # 上に遡って.envを探す（最大10階層）
+    for i in {1..10}; do
+        if [[ -f "${current_dir}/.env" ]]; then
+            env_file="${current_dir}/.env"
+            break
+        fi
+        # 親ディレクトリへ移動
+        current_dir="$(dirname "$current_dir")"
+        # ルートディレクトリに到達したら終了
+        if [[ "$current_dir" == "/" ]]; then
+            break
+        fi
+    done
+
     if [[ -f "${env_file}" ]]; then
         while IFS='=' read -r key value; do
             # コメント行と空行をスキップ

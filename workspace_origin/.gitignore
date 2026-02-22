@@ -1,0 +1,21 @@
+# Environment variables
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+
+# Media files
+media/*.jpg
+media/*.jpeg
+media/*.png
+media/*.mp4
+
+# Temporary files
+*.tmp
+*.log
