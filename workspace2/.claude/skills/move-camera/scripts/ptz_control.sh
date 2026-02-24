@@ -3,7 +3,8 @@
 # uv経由でPythonスクリプトを実行します
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PYTHON_DIR="/home/tane/dev/AI/yatagarasu/python"
+WORKSPACE_DIR="$(cd "${SCRIPT_DIR}/../../../../.." && pwd)"
+PYTHON_DIR="${WORKSPACE_DIR}"
 
 # .envファイルから環境変数を読み込む
 load_env_file() {
@@ -46,4 +47,4 @@ export TAPO_HOST="${TAPO_HOST:-192.168.0.132}"
 export TAPO_USER="${TAPO_USER:-admin}"
 
 # uv経由でPythonスクリプトを実行
-cd "${PYTHON_DIR}" && uv run python "${SCRIPT_DIR}/ptz_control" "$@"
+cd "${PYTHON_DIR}" && "${PYTHON_DIR}/.venv/bin/python" "${SCRIPT_DIR}/ptz_control" "$@"

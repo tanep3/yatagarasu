@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/tane/dev/AI/yatagarasu/workspace2/.venv/bin/python
 """
 Tapo TC70 カメラ PTZ 制御スクリプト
 
@@ -9,7 +9,7 @@ Pytapoを使用してTapoカメラのPTZ（Pan-Tilt-Zoom）制御を行います
     ptz_control --right         # 右に45度回転
     ptz_control --up            # 上に30度向ける
     ptz_control --down          # 下に30度向ける
-    ptz_control --move 100 50   # 角度指定で相対移動
+    ptz_control --move 100 50   # 角度指定で相対移動。左、下移動はマイナス値
     ptz_control --calibrate     # キャリブレーション
 """
 

@@ -19,3 +19,4 @@ media/*.mp4
 # Temporary files
 *.tmp
 *.log
+*.wav
