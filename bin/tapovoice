@@ -39,7 +39,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # 一時ファイル（そのまま使うので拡張子wav）
-TMP_WAV="/tmp/tapo_audio_$$.wav"
+export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
+TMP_WAV="$YATAGARASU_CWD/tapo_audio_$$.wav"
 
 # 入力ソースの決定
 if [ -n "$INPUT_FILE" ]; then
@@ -87,7 +88,8 @@ curl -s -X POST "$URL" >/dev/null 2>&1 || {
 }
 
 # クリーンアップ
-rm -f "$TMP_WAV"
+# rm -f "$TMP_WAV"
+(sleep 10; rm -f "$TMP_WAV") >/dev/null 2>&1 &
 
 echo "送信完了！ $STREAM_NAME のスピーカーから音が出るはずです♡"
 # echo "聞こえなかったら、go2rtcのログ（-debugで起動）やTapoアプリの音量を確認してみてね。"

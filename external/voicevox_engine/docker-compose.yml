@@ -1,0 +1,10 @@
+services:
+  voicevox:
+    image: voicevox/voicevox_engine:cpu-latest
+    environment:
+      - VV_CPU_NUM_THREADS=4
+    ports:
+      - "127.0.0.1:50021:50021"
+    restart: unless-stopped
+    stdin_open: true
+    tty: true

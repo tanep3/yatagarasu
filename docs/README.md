@@ -15,7 +15,9 @@
 
 1. `docs/plan/tapo-robot-requirements.md`
 2. `docs/plan/tapo-robot-thinking-order.md`
-3. `docs/plan/tapo-robot-architecture.md`
-4. `docs/plan/tapo-robot-deployment.md`
-5. `docs/tasks/tapo-robot-backlog.md`
-6. `docs/considerations/open-issues.md`
+3. `docs/plan/tapo-robot-listend-system-design.md`
+4. `docs/plan/tapo-robot-listend-install.md`
+5. `docs/plan/tapo-robot-architecture.md`
+6. `docs/plan/tapo-robot-deployment.md`
+7. `docs/tasks/tapo-robot-backlog.md`
+8. `docs/considerations/open-issues.md`

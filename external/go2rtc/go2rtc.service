@@ -1,0 +1,12 @@
+[Unit]
+Description=go2rtc - Camera Streaming Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/home/<user>/bin/go2rtc -config /home/<user>/yatagarasu/external/go2rtc/go2rtc.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
