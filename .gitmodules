@@ -1,3 +1,6 @@
 [submodule "external/SemanticMemory"]
 	path = external/SemanticMemory
 	url = https://github.com/tanep3/SemanticMemory.git
+[submodule "external/ReazonSpeech"]
+	path = external/ReazonSpeech
+	url = https://github.com/reazon-research/ReazonSpeech.git
