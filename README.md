@@ -24,6 +24,8 @@ Tapo見守りカメラ（TC70/C200/C220等）をロボット化するための�
 - user systemd
   - `go2rtc`（カメラ中継）
   - `listend.py`（常時リッスン / wake-stop / dispatch）
+- host service
+  - `Ollama`（SemanticMemory要約用）
 - Docker
   - `voicevox_engine`
   - `SemanticMemory`
@@ -56,8 +58,9 @@ claude -p "hello" --model haiku
 2. Claude Code CLI（`claude`）導入・認証確認
 3. `.env` 設定
 4. `go2rtc`（user systemd）起動
-5. Dockerサービス（`voicevox_engine` / `SemanticMemory` / `searxng`）起動
-6. `listend.py`（user systemd）起動
+5. `Ollama`（host）導入・モデル取得
+6. Dockerサービス（`voicevox_engine` / `SemanticMemory` / `searxng`）起動
+7. `listend.py`（user systemd）起動
 
 ## ライセンス
 

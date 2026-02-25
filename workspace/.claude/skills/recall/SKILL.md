@@ -1,6 +1,6 @@
 ---
 name: recall
-description: SemanticMemory APIを使って過去の記憶を検索・想起するスキル。ユーザーが「思い出して」「覚えてる？」「何か記憶ある？」「以前何か言ってた」と言う時や、過去の会話や情報を参照したい場合に使用。意味検索で関連記憶を類似度スコア付きで取得します。
+description: Retrieve past memories from SemanticMemory API via semantic search. Use when user says "思い出して", "覚えてる？", "何か記憶ある？", "recall", "remember", or wants to reference past conversations or information.
 ---
 
 # Recall - 記憶検索スキル

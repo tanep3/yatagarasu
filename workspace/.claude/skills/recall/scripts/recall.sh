@@ -55,11 +55,17 @@ show_help() {
     SEMANTIC_MEMORY_RECALL_THRESHOLD       デフォルト類似度閾値
 
 例:
-    $(basename "$0") "猫について"
-    $(basename "$0") "WiFi" --limit 5
-    $(basename "$0") "プロジェクト" --threshold 0.6
+    $(basename "$0\") "猫について"
+    $(basename "$0\") "WiFi" --limit 5
+    $(basename "$0\") "プロジェクト" --threshold 0.6
 EOF
 }
+
+# ヘルプオプションを最初にチェック
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
 
 # 引数解析
 QUERY="$1"

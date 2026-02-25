@@ -1,9 +1,9 @@
 ---
-name: remember
-description: SemanticMemory APIを使って会話内容や重要事項を長期記憶として保存するスキル。ユーザーが「覚えて」「記憶して」「メモして」「これを保存して」と言う時や、重要な情報を保持したい場合に使用。SQLiteとベクトルDBに同時保存し、要約も自動生成されます。
+name: memorize
+description: Memorize/Store information to long-term memory. TRIGGER WORDS: "覚えて", "記憶して", "メモして", "memorize", "save this", "覚えてね", "覚えておいて". Use when user explicitly wants to save/store information.
 ---
 
-# Remember - 記憶保存スキル
+# Memorize - 記憶保存スキル
 
 SemanticMemory APIを使って情報を長期記憶として保存します。
 
@@ -11,26 +11,26 @@ SemanticMemory APIを使って情報を長期記憶として保存します。
 
 ```bash
 # 基本的な使い方
-remember "ユーザーは猫を飼っている"
+memorize "ユーザーは猫を飼っている"
 
 # サブテキスト付き（追加情報）
-remember "WiFiパスワードはhogehoge" --sub "自宅のWiFi"
+memorize "WiFiパスワードはhogehoge" --sub "自宅のWiFi"
 
 # 要約なし（そのまま保存）
-remember "単純なメモ" --no-summarize
+memorize "単純なメモ" --no-summarize
 ```
 
 ## 使用例
 
 ```bash
 # ユーザー設定を記憶
-remember "ユーザーの名前はたねちゃん"
+memorize "ユーザーの名前はたねちゃん"
 
 # 会話中の重要事項を記憶
-remember "ユーザーはRustが好き"
+memorize "ユーザーはRustが好き"
 
 # 複雑な情報を記憶（要約付き）
-remember "プロジェクトの設定ファイルは ~/dev/AI/yatagarasu/.env にある" --sub "環境設定"
+memorize "プロジェクトの設定ファイルは ~/dev/AI/yatagarasu/.env にある" --sub "環境設定"
 ```
 
 ## オプション

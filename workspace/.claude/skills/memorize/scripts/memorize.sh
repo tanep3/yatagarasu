@@ -1,5 +1,5 @@
 #!/bin/bash
-# remember - SemanticMemoryに記憶を保存するスクリプト
+# memorize - SemanticMemoryに記憶を保存するスクリプト
 
 set -e
 
@@ -53,11 +53,17 @@ show_help() {
     SEMANTIC_MEMORY_API_URL    SemanticMemory APIのURL (デフォルト: http://localhost:6001/api)
 
 例:
-    $(basename "$0") "ユーザーは猫を飼っている"
-    $(basename "$0") "WiFiパスワードはhogehoge" --sub "自宅のWiFi"
-    $(basename "$0") "単純なメモ" --no-summarize
+    $(basename "$0\") "ユーザーは猫を飼っている"
+    $(basename "$0\") "WiFiパスワードはhogehoge" --sub "自宅のWiFi"
+    $(basename "$0\") "単純なメモ" --no-summarize
 EOF
 }
+
+# ヘルプオプションを最初にチェック
+if [[ "$1" == "-h" || "$1" == "--help" ]]; then
+    show_help
+    exit 0
+fi
 
 # 引数解析
 MAIN_TEXT="$1"

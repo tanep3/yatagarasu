@@ -13,7 +13,7 @@
   - `listend.py`（常時音声認識）
 - Docker
   - `voicevox_engine`（TTSエンジン）
-  - `SemanticMemory`（記憶API）
+  - `SemanticMemory`（記憶API、ホストOllamaに接続）
   - `searxng`（`tanechan-search` 用の検索エンジン）
 
 ## 1. 前提条件
@@ -28,6 +28,7 @@
 - `uv`
 - `ffmpeg` / `ffprobe` / `ffplay`
 - `curl`
+- `ollama`（SemanticMemory要約用）
 - `jq`
 - `systemctl --user`
 
@@ -40,6 +41,7 @@ docker compose version
 python3 --version
 uv --version
 ffmpeg -version | head -n 1
+ollama --version
 ```
 
 ## 1.2 Claude CLI
@@ -196,7 +198,35 @@ docker compose up -d
 curl -s http://127.0.0.1:50021/version
 ```
 
-## 6.2 SemanticMemory
+## 6.2 Ollama（SemanticMemory依存）
+
+`SemanticMemory` は内部で要約時に `Ollama` を呼び出します。  
+このリポジトリの `external/SemanticMemory/docker-compose.yml` は
+`OLLAMA_URL=http://localhost:11434` を使うため、**ホスト側で Ollama を起動**しておく必要があります。
+
+導入（Linux）:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama --version
+```
+
+動作確認:
+
+```bash
+curl -s http://127.0.0.1:11434/api/tags
+```
+
+SemanticMemory既定モデルの取得:
+
+```bash
+ollama pull hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q8_0
+```
+
+補足:
+- モデルを変える場合は `external/SemanticMemory/.env` の `LLM_MODEL` を合わせて変更してください。
+
+## 6.3 SemanticMemory
 
 ```bash
 cd external/SemanticMemory
@@ -209,7 +239,7 @@ docker compose up -d
 curl -s http://127.0.0.1:6001/docs > /dev/null && echo ok
 ```
 
-## 6.3 searxng（`tanechan-search` 用）
+## 6.4 searxng（`tanechan-search` 用）
 
 `external/searxng/docker-compose.yml` を使います。
 
@@ -238,6 +268,7 @@ After=network.target go2rtc.service
 Type=simple
 WorkingDirectory=/home/<user>/.../yatagarasu/workspace
 Environment=YATAGARASU_CWD=/home/<user>/.../yatagarasu/workspace
+Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/<user>/.../yatagarasu/python/.venv/bin/python /home/<user>/.../yatagarasu/python/listend.py
 Restart=on-failure
 RestartSec=3
@@ -246,12 +277,17 @@ RestartSec=3
 WantedBy=default.target
 ```
 
+重要:
+- `systemd --user` サービスは通常 `.bashrc` を読まないため、`Environment=PATH=...` を unit に明示してください。
+- `claude` が `/home/<user>/.local/bin/claude` にある場合、`/home/<user>/.local/bin` を必ず含めてください。
+
 起動:
 
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now yatagarasu-listend
 systemctl --user status yatagarasu-listend
+systemctl --user show yatagarasu-listend -p Environment -p WorkingDirectory
 journalctl --user -u yatagarasu-listend -f
 ```
 
@@ -307,6 +343,12 @@ YATAGARASU_CWD="$(pwd)/workspace" LISTEND_LOG_LEVEL=DEBUG ./python/.venv/bin/pyt
 6. `dispatch failed` / `dispatch timed out` で `claude` 関連エラーが出る
 - 対策: `which claude` と `claude --version` を、`yatagarasu-listend.service` 実行ユーザーで確認。
 - 対策: 手動で `bin/yatagarasu "test"` を実行して、`claude` 認証状態を確認。
+- 対策: `claude: command not found` の場合、unit に `Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin` を追加し、`daemon-reload` 後に再起動。
+
+7. `SemanticMemory` で要約だけ失敗する / `OLLAMA_URL` 接続エラー
+- 対策: ホストで `curl -s http://127.0.0.1:11434/api/tags` が成功するか確認。
+- 対策: `ollama pull hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q8_0` でモデルを取得。
+- 対策: `external/SemanticMemory/.env` の `OLLAMA_URL` / `LLM_MODEL` を実環境に合わせる。
 
 ## 10. セキュリティ注意
 

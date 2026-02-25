@@ -141,6 +141,7 @@ After=network.target
 Type=simple
 WorkingDirectory=/path/to/yatagarasu/workspace
 Environment=YATAGARASU_CWD=/path/to/yatagarasu/workspace
+Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/path/to/yatagarasu/python/.venv/bin/python /path/to/yatagarasu/python/listend.py
 Restart=on-failure
 RestartSec=3
@@ -149,6 +150,10 @@ RestartSec=3
 WantedBy=default.target
 ```
 
+注意:
+- `systemd --user` は通常 `.bashrc` を読まないため、`claude` が見つからない場合は unit 側で `Environment=PATH=...` を明示する。
+- 例: `claude` が `/home/<user>/.local/bin/claude` の場合、`/home/<user>/.local/bin` を PATH に含める。
+
 有効化:
 
 ```bash
@@ -156,6 +161,7 @@ systemctl --user daemon-reload
 systemctl --user enable yatagarasu-listend
 systemctl --user start yatagarasu-listend
 systemctl --user status yatagarasu-listend
+systemctl --user show yatagarasu-listend -p Environment -p WorkingDirectory
 ```
 
 ログ確認:
