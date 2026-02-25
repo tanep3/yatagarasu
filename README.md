@@ -29,8 +29,6 @@ Tapo見守りカメラ（TC70/C200/C220等）をロボット化するための�
   - `SemanticMemory`
   - `searxng`（`tanechan-search` 用）
 
-詳細セットアップ手順は `docs/setup-manual.md` を参照してください。
-
 ## LLM実行基盤（Claude Code）
 
 `bin/yatagarasu` は内部で **Claude Code CLI (`claude`)** を呼び出します。  
@@ -51,7 +49,7 @@ claude -p "hello" --model haiku
 
 ## セットアップ
 
-セットアップ手順は `docs/setup-manual.md` に集約しています。  
+セットアップ手順は [docs/setup-manual.md](docs/setup-manual.md) に集約しています。  
 以下の順で進めてください。
 
 1. 前提条件の確認
