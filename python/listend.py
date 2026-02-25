@@ -176,6 +176,12 @@ class ListendSettings:
     channels: int
     dispatch_cmd: str
     dispatch_timeout_sec: float
+    wake_ack_word: str
+    standby_word: str
+    wake_ack_speaker_id: str
+    wake_ack_timeout_sec: float
+    wake_ack_zunda_cmd: str
+    wake_ack_tapovoice_cmd: str
     ffmpeg_bin: str
     reconnect_delay_sec: float
     max_reconnect_attempts: int
@@ -234,6 +240,22 @@ class ListendSettings:
         dispatch_cmd = os.getenv("LISTEND_DISPATCH_CMD", "").strip()
         if not dispatch_cmd:
             dispatch_cmd = str((workspace_path.parent / "bin" / "yatagarasu").resolve())
+
+        wake_ack_word = os.getenv("LISTEND_WAKE_ACK_WORD", "").strip()
+        standby_word = os.getenv("LISTEND_STANDBY_WORD", "待機します。").strip()
+        wake_ack_speaker_id = (
+            os.getenv("LISTEND_WAKE_ACK_SPEAKER_ID", "").strip()
+            or os.getenv("SPEAKER_ID", "").strip()
+            or "68"
+        )
+        wake_ack_zunda_cmd = os.getenv("LISTEND_WAKE_ACK_ZUNDA_CMD", "").strip()
+        if not wake_ack_zunda_cmd:
+            wake_ack_zunda_cmd = str((workspace_path.parent / "bin" / "zunda").resolve())
+        wake_ack_tapovoice_cmd = os.getenv("LISTEND_WAKE_ACK_TAPOVOICE_CMD", "").strip()
+        if not wake_ack_tapovoice_cmd:
+            wake_ack_tapovoice_cmd = str(
+                (workspace_path.parent / "bin" / "tapovoice").resolve()
+            )
 
         if os.getenv("LISTEND_SEGMENT_END_SILENCE_CHUNKS", "").strip():
             logging.warning(
@@ -308,6 +330,12 @@ class ListendSettings:
             channels=env_int("LISTEND_CHANNELS", 1),
             dispatch_cmd=dispatch_cmd,
             dispatch_timeout_sec=env_float("LISTEND_DISPATCH_TIMEOUT_SEC", 20.0),
+            wake_ack_word=wake_ack_word,
+            standby_word=standby_word,
+            wake_ack_speaker_id=wake_ack_speaker_id,
+            wake_ack_timeout_sec=env_float("LISTEND_WAKE_ACK_TIMEOUT_SEC", 8.0),
+            wake_ack_zunda_cmd=wake_ack_zunda_cmd,
+            wake_ack_tapovoice_cmd=wake_ack_tapovoice_cmd,
             ffmpeg_bin=os.getenv("LISTEND_FFMPEG_BIN", "ffmpeg").strip() or "ffmpeg",
             reconnect_delay_sec=env_float("LISTEND_RECONNECT_DELAY_SEC", 3.0),
             max_reconnect_attempts=env_int("LISTEND_MAX_RECONNECT_ATTEMPTS", 0),
@@ -330,6 +358,7 @@ class ListendService:
 
         self.last_voice_at = time.monotonic()
         self.session_text_chunks: list[str] = []
+        self.wake_ack_pending = False
         self.last_off_transcribe_at = 0.0
         self.chunk_index = 0
 
@@ -841,6 +870,12 @@ class ListendService:
             self._set_state(ListenState.OFF, reason="stop word detected")
             return
 
+        if wake_hit:
+            # 一時対応:
+            # ON中の再ウェイクでは確認音声を鳴らさない。
+            # 連続発話中のストリーム中断頻度を下げるため。
+            logging.info("wake word detected while ON; wake ack suppressed (temporary)")
+
         self._append_session_text(transcription)
 
     def _flush_before_exit(self) -> None:
@@ -854,8 +889,15 @@ class ListendService:
         self.state = new_state
 
         if new_state == ListenState.ON:
-            self.last_voice_at = time.monotonic()
             self.session_text_chunks.clear()
+            if old_state != new_state:
+                if self._play_wake_ack():
+                    self.wake_ack_pending = False
+                else:
+                    self.wake_ack_pending = True
+            # ON遷移時の副作用（wake ack再生など）完了後を
+            # 無音タイマーの起点にする。
+            self.last_voice_at = time.monotonic()
 
         if new_state == ListenState.OFF:
             self.in_segment = False
@@ -863,6 +905,9 @@ class ListendService:
             self.segment_buffer.clear()
             self.vad_hangover_remaining = 0
             self.session_text_chunks.clear()
+            self.wake_ack_pending = False
+            if old_state != new_state:
+                self._play_standby_word()
 
         if old_state != new_state:
             logging.info("state transition: %s -> %s (%s)", old_state, new_state, reason)
@@ -879,6 +924,13 @@ class ListendService:
         self.session_text_chunks.clear()
         if not text:
             return
+        if self.wake_ack_pending:
+            if self._play_wake_ack():
+                self.wake_ack_pending = False
+            else:
+                logging.warning(
+                    "wake ack was not completed; will retry before next dispatch"
+                )
         logging.info("dispatch session (%s): %s", reason, text)
         self._dispatch(text)
 
@@ -1162,6 +1214,94 @@ class ListendService:
 
         logging.info("dispatch succeeded elapsed=%.2fs", elapsed)
 
+    def _play_wake_ack(self) -> bool:
+        word = self.settings.wake_ack_word.strip()
+        return self._play_feedback_word(word, label="wake ack")
+
+    def _play_standby_word(self) -> bool:
+        word = self.settings.standby_word.strip()
+        return self._play_feedback_word(word, label="standby")
+
+    def _play_feedback_word(self, word: str, label: str) -> bool:
+        if not word:
+            return True
+
+        zunda_argv = shlex.split(self.settings.wake_ack_zunda_cmd)
+        tapovoice_argv = shlex.split(self.settings.wake_ack_tapovoice_cmd)
+        if not zunda_argv:
+            logging.warning("%s skipped: zunda command is empty", label)
+            return False
+        if not tapovoice_argv:
+            logging.warning("%s skipped: tapovoice command is empty", label)
+            return False
+
+        zunda_cmd = [
+            *zunda_argv,
+            word,
+            "--stdout",
+            "-s",
+            self.settings.wake_ack_speaker_id,
+        ]
+        logging.info("%s: '%s' via `%s | %s`", label, word, " ".join(zunda_cmd), " ".join(tapovoice_argv))
+
+        zunda_proc: subprocess.Popen[bytes] | None = None
+        tapovoice_proc: subprocess.Popen[bytes] | None = None
+        try:
+            zunda_proc = subprocess.Popen(
+                zunda_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=os.environ.copy(),
+            )
+            if zunda_proc.stdout is None:
+                raise RuntimeError("zunda stdout pipe is not available")
+            tapovoice_proc = subprocess.Popen(
+                tapovoice_argv,
+                stdin=zunda_proc.stdout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=os.environ.copy(),
+            )
+            zunda_proc.stdout.close()
+            timeout = max(1.0, self.settings.wake_ack_timeout_sec)
+            tapovoice_out, tapovoice_err = tapovoice_proc.communicate(timeout=timeout)
+            zunda_out, zunda_err = zunda_proc.communicate(timeout=timeout)
+            if zunda_proc.returncode != 0:
+                logging.warning(
+                    "%s zunda failed rc=%s stderr=%s",
+                    label,
+                    zunda_proc.returncode,
+                    (zunda_err or b"").decode("utf-8", errors="ignore").strip(),
+                )
+                return False
+            if tapovoice_proc.returncode != 0:
+                logging.warning(
+                    "%s tapovoice failed rc=%s stderr=%s",
+                    label,
+                    tapovoice_proc.returncode,
+                    (tapovoice_err or b"").decode("utf-8", errors="ignore").strip(),
+                )
+                return False
+            out_text = (tapovoice_out or b"").decode("utf-8", errors="ignore").strip()
+            if out_text:
+                logging.info("%s output: %s", label, out_text)
+            return True
+        except FileNotFoundError as exc:
+            logging.warning("%s command not found: %s", label, exc)
+            return False
+        except subprocess.TimeoutExpired:
+            logging.warning("%s timed out after %.1fs", label, self.settings.wake_ack_timeout_sec)
+            if tapovoice_proc and tapovoice_proc.poll() is None:
+                tapovoice_proc.kill()
+                tapovoice_proc.wait(timeout=1)
+            if zunda_proc and zunda_proc.poll() is None:
+                zunda_proc.kill()
+                zunda_proc.wait(timeout=1)
+            return False
+        except Exception as exc:
+            logging.warning("%s failed: %s", label, exc)
+            return False
+
 
 def setup_logging(level_name: str) -> None:
     level = getattr(logging, level_name.upper(), logging.INFO)
@@ -1197,6 +1337,7 @@ def main() -> int:
     setup_logging(settings.log_level)
     logging.info("workspace=%s", settings.workspace_path)
     logging.info("dispatch_cmd=%s", settings.dispatch_cmd)
+    logging.info("dispatch_timeout_sec=%.1f", settings.dispatch_timeout_sec)
     logging.info("stt_backend=%s", settings.stt_backend)
     logging.info("stt_language=%s", settings.stt_language)
     if settings.stt_backend == "faster-whisper":
@@ -1242,6 +1383,13 @@ def main() -> int:
     )
     logging.info("audio_filter=%s", DEFAULT_AUDIO_FILTER)
     logging.info("reazon_max_segment_sec=%.1f", DEFAULT_REAZON_MAX_SEGMENT_SEC)
+    logging.info(
+        "wake_ack=%s standby_word=%s speaker=%s timeout_sec=%.1f",
+        settings.wake_ack_word if settings.wake_ack_word else "(disabled)",
+        settings.standby_word if settings.standby_word else "(disabled)",
+        settings.wake_ack_speaker_id,
+        settings.wake_ack_timeout_sec,
+    )
     logging.info("debug_detail=%s", "enabled (LISTEND_LOG_LEVEL=DEBUG)" if logging.getLogger().isEnabledFor(logging.DEBUG) else "disabled")
 
     try:

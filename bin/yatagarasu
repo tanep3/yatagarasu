@@ -92,3 +92,4 @@ fi
 # Claude Codeの応答を取得し、ずんだもんで喋らせる
 # YATAGARASU_CWDを渡すことで、再帰呼び出し時も正しい.envを見つけられる
 YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"
+# MAX_THINKING_TOKENS=0 YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"

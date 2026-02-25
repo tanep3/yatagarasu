@@ -34,6 +34,9 @@ Thumbs.db
 *.tmp
 *.swp
 
+# プロジェクト固有
+media/*
+oldcontents/
+
 # 環境変数（※.env は ignore、env.exampleをコピーして使う）
 .env
-media/*

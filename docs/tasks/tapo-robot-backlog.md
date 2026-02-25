@@ -29,9 +29,10 @@
 
 ## Phase 5 デプロイ
 
-- [ ] docker compose（voicevox/go2rtc）を確定する
+- [ ] docker compose（voicevox/SemanticMemory）を確定する
+- [ ] go2rtc の user systemd 運用を確定する
 - [ ] systemd unit群を作成し、再起動ポリシーを設定する
-- [ ] `~/.config/yatagarasu/` の設定ローダを実装する
+- [ ] `workspace/.env`（`YATAGARASU_CWD/.env`）の設定ローダを実装する
 
 ## Phase 6 回帰テスト
 

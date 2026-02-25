@@ -53,7 +53,7 @@ WIDTH="${WIDTH:-640}"
 HEIGHT="${HEIGHT:-480}"
 OUTPUT="${OUTPUT:-}"
 QUALITY="${QUALITY:-85}"
-WORKSPACE_MEDIA="${WORKSPACE_MEDIA:-/home/tane/dev/AI/yatagarasu/workspace2/media}"
+WORKSPACE_MEDIA="${WORKSPACE_MEDIA:-/home/tane/dev/AI/yatagarasu/workspace/media}"
 
 # ヘルプメッセージ
 show_help() {
@@ -135,10 +135,10 @@ TEMP_FILE=$(mktemp --suffix=.jpg)
 trap "rm -f ${TEMP_FILE}" EXIT
 
 # go2rtcのRTSP URL
-RTSP_URL="rtsp://${GO2RTC_HOST}:${GO2RTC_RTSP_PORT}/${STREAM}"
+RTSP_URL="rtsp://${GO2RTC_HOST}:${GO2RTC_RTSP_PORT}/${STREAM}?video&audio"
 
 # ffmpegでストリームから1フレーム取得
-if ! ffmpeg -loglevel error -t 1 -i "${RTSP_URL}" -frames:v 1 -q:v "${QUALITY}" -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2" -y "${TEMP_FILE}" 2>/dev/null; then
+if ! ffmpeg -loglevel error -rtsp_transport tcp -t 1 -i "${RTSP_URL}" -frames:v 1 -q:v "${QUALITY}" -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2" -update 1 -y "${TEMP_FILE}" 2>/dev/null; then
     echo "エラー: go2rtcから画像を取得できませんでした: ${RTSP_URL}" >&2
     echo "ヒント: go2rtcが起動しているか、ストリーム名が正しいか確認してください" >&2
     exit 1

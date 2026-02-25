@@ -1,6 +1,6 @@
-# Tapo Robot 検討順序ガイド v0.1
+# Tapo Robot 検討順序ガイド v0.2
 
-- 作成日: 2026-02-20
+- 更新日: 2026-02-24
 - 目的: 実装前に、決める順序を固定して手戻りを減らす
 
 ## Step 1 目的と境界を固定する
@@ -31,7 +31,7 @@
 
 ## Step 6 設定と秘密情報の管理を決める
 
-- `~/.config/yatagarasu/.env` と `.config.yml` のキー定義
+- `workspace/.env`（実体は `YATAGARASU_CWD/.env`）のキー定義
 - 権限と運用手順
 
 ## Step 7 実装タスクに分解する

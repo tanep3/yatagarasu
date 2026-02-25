@@ -1,9 +1,9 @@
-# Tapo Robot デプロイ方針 v0.1
+# Tapo Robot デプロイ方針 v0.2
 
-- 作成日: 2026-02-20
+- 更新日: 2026-02-24
 - 目的: 常駐安定性とハードウェア制御の両立
 
-## 1. 比較対象
+## 1. 方針
 
 ### A. すべて systemd（ホスト実行）
 
@@ -12,7 +12,7 @@
   - デバッグしやすい
   - 低レイテンシ
 - 短所
-  - 依存の衝突が起きやすい
+  - 依存衝突が起きやすい
   - 配布再現性が弱い
 
 ### B. すべて Docker
@@ -22,60 +22,69 @@
   - サービス分離が明確
 - 短所
   - 音声入出力・RTSP・ONVIF周りの調整が増える
-  - 常時運用時の遅延要因が増える
+  - 遅延要因が増える
 
-### C. ハイブリッド（推奨）
+### C. ハイブリッド（採用）
 
-- systemd: トリガ監視、オーケストレーション、ローカル制御CLI
-- Docker: VoiceVox、go2rtc など外部依存の強いサービス
-- 長所
-  - レイテンシと再現性のバランスが最も良い
-  - 障害切り分けがしやすい
+- user systemd: `listend` / `motiond` / orchestrator / wakeup timer / `go2rtc`
+- docker compose: `voicevox_engine` / `SemanticMemory`
+- 理由
+  - go2rtc は host 配置の方が音声連携調整が容易
+  - VoiceVox と SemanticMemory はコンテナ化で再現性を確保しやすい
 
-## 2. 推奨構成
+## 2. 実運用構成
 
-### 2.1 常駐サービス（systemd）
+### 2.1 user systemd
 
+- `go2rtc.service`
+  - `external/go2rtc/go2rtc.yaml` を読み込んで常駐
 - `yatagarasu-listend.service`
   - RTSP音声取得
   - VAD/ウェイクワード検知
   - ON/OFF状態遷移
 - `yatagarasu-motiond.service`
   - 動体検知トリガ受信
-  - オーケストレータ起動
 - `yatagarasu-orchestrator@.service`
-  - trigger payloadを受けて単発推論実行
-  - `claude -p ...` 呼び出し
+  - trigger payload から単発推論
 - `yatagarasu-wakeup.timer` + `yatagarasu-wakeup.service`
-  - 定時ウェイクアップ
+  - 定時ウェイク
 
-### 2.2 コンテナサービス（docker compose）
+### 2.2 docker compose
 
-- `voicevox_engine`
-- `go2rtc`
+- `external/voicevox_engine/docker-compose.yml`
+  - `voicevox_engine`
+- `external/SemanticMemory/docker-compose.yml`
+  - `semanticmemory`
 
-## 3. 設定・秘密情報の配置
+## 3. ストリーム分離（推奨）
 
-- `~/.config/yatagarasu/.env`
-  - 接続情報、トークン、パスワード
-- `~/.config/yatagarasu/.config.yml`
-  - タイムアウト、閾値、モデル名、トリガ設定
-- ファイル権限
-  - `chmod 600 ~/.config/yatagarasu/.env`
+- `listend` 用: `tapo_tc70`
+- `speak` 用: `tapo_tc70_speak`
 
-## 4. 起動順序
+補足:
+- `bin/tapovoice` のデフォルト送信先は `tapo_tc70_speak`。
+- `listend` の `LISTEND_RTSP_URL` は通常 `tapo_tc70` を参照する。
 
-1. Dockerサービス起動（voicevox/go2rtc）
-2. `listend` と `motiond` 起動
-3. timer開始
-4. trigger受信ごとに `orchestrator@` を起動
+## 4. 設定・秘密情報
 
-## 5. 運用ルール
+- 設定は `YATAGARASU_CWD/.env` に集約する（標準運用例: `workspace/.env`）。
+- `YATAGARASU_CWD` は systemd unit の `Environment=` で明示する。
+- `.config.yml` は現行運用では不使用。
 
-- 失敗時は必ずログ保存し、次フェーズへ進まない。
-- リグレッション確認として、最低限以下を毎回実行する。
+## 5. 起動順序
+
+1. `go2rtc` 起動（user systemd）
+2. Docker サービス起動（VoiceVox / SemanticMemory）
+3. `yatagarasu-listend` と `motiond` 起動
+4. `wakeup.timer` 起動
+5. trigger 受信ごとに `orchestrator@` 実行
+
+## 6. 運用ルール
+
+- 失敗時は必ずログを保存し、原因を切り分ける。
+- リグレッション確認として最低限以下を毎回実行する。
 1. `speak` 実行確認
 2. `move-camera` 実行確認
 3. `view` 実行確認
-4. `listend` のON/OFF遷移確認
-5. `orchestrator` の単発起動確認
+4. `listend` ON/OFF遷移確認
+5. `orchestrator` 単発起動確認
