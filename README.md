@@ -1,7 +1,12 @@
 # Yatagarasu
 
-Tapo見守りカメラをロボット化するためのローカル実行プロジェクトです。  
+Tapo見守りカメラ（TC70/C200/C220等）をロボット化するためのローカル実行プロジェクトです。  
 音声認識（`listend.py`）・発話（`zunda` + `tapovoice`）・カメラ連携（go2rtc）・記憶（SemanticMemory）を組み合わせて動作します。
+
+## Demo
+![Tapo Camera](./IMG_TapoCamera.jpg)   
+[Demo Video](https://tanep.work/yatagarasu/demo/yatagarasu_demo.mp4)  
+> ブラウザで直接再生されない場合はリンク先を開いてください。
 
 ## なぜ Yatagarasu（八咫烏）なのか
 
@@ -13,11 +18,6 @@ Tapo見守りカメラをロボット化するためのローカル実行プロ�
 - CCD（目）
 - マイク（耳）
 - スピーカー（口）
-
-## Demo
-
-[Demo Video](https://tanep.work/yatagarasu/demo/yatagarasu_demo.mp4)  
-> ブラウザで直接再生されない場合はリンク先を開いてください。
 
 ## 構成概要
 
