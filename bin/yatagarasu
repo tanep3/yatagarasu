@@ -159,5 +159,5 @@ echo "$RESPONSE" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tap
 # 会話を記憶に保存
 if [[ "$MEMORY_ENABLED" == "true" ]] && [[ -n "$RESPONSE" ]]; then
     CONVERSATION="[user]${PROMPT}"$'\n'"[agent]${RESPONSE}"
-    "$SCRIPT_DIR/memorize.sh" "$CONVERSATION" --no-summarize >/dev/null 2>&1 || true
+    "$SCRIPT_DIR/memorize.sh" "$CONVERSATION" >/dev/null 2>&1 || true
 fi
