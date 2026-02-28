@@ -860,6 +860,12 @@ class ListendService:
         if self.state == ListenState.OFF:
             self.last_off_transcribe_at = now
             if wake_hit:
+                # 自分の発話したウェイクワードのみの場合は無視（ループ防止）
+                without_wake = self._remove_words(transcription, self.settings.wake_words)
+                without_wake_normalized = " ".join(without_wake.split()).strip()
+                if not without_wake_normalized:
+                    logging.info("wake word detected but transcription contains only wake words; ignoring to prevent loop")
+                    return
                 # ウェイクワード検出時はACK発話してディスパッチ
                 # transcriptionを保持して、wake word検出時はACK発話してディスパッチ
                 logging.info("wake word detected in OFF segment; dispatching with text")
