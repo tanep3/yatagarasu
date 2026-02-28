@@ -36,7 +36,7 @@ load_env_file
 
 # デフォルト値（.envで設定可能）
 MODEL="${YATAGARASU_MODEL:-haiku}"
-SPEAKER="${YATAGARASU_SPEAKER:-68}"
+SPEAKER="${SPEAKER_ID:-68}"
 # SemanticMemory設定
 MEMORY_ENABLED="${YATAGARASU_MEMORY_ENABLED:-true}"
 
@@ -51,7 +51,7 @@ usage() {
     echo "オプション:" >&2
     echo "  -m, --model MODEL      Claudeモデル (デフォルト: haiku)" >&2
     echo "                         利用可能なモデル: haiku, sonnet, opus" >&2
-    echo "  -s, --speaker ID       ずんだもんスピーカーID (デフォルト: 68)" >&2
+    echo "  -s, --speaker ID       ずんだもんスピーカーID (SPEAKER_ID優先)" >&2
     echo "                         主なスピーカー:" >&2
     echo "                           46: 小夜/SAYO" >&2
     echo "                           68: あいえるたん" >&2
