@@ -140,11 +140,11 @@ else
     echo "    (なし)"
 fi
 
-# 関連知識（類似度順）
+# 関連知識（類似度順）- semanticはdocumentフィールドを使用
 echo "  related_knowledge: |"
 SEMANTIC_COUNT=$(echo "$RESPONSE" | jq -r '.semantic | length' 2>/dev/null || echo "0")
 if [[ "$SEMANTIC_COUNT" -gt 0 ]]; then
-    echo "$RESPONSE" | jq -r '.semantic[] | "    - [\(.score | tonumber | . * 100 | floor // 100)] \(.main_text // "")"' 2>/dev/null || echo "    (なし)"
+    echo "$RESPONSE" | jq -r '.semantic[] | "    - [\(.score | tonumber | . * 100 | floor // 100)] \(.document // "")"' 2>/dev/null || echo "    (なし)"
 else
     echo "    (なし)"
 fi
