@@ -170,6 +170,7 @@ class ListendSettings:
     vad_threshold: float
     min_segment_sec: float
     off_transcribe_cooldown_sec: float
+    wake_suppression_sec: float
     silence_timeout_sec: float
     session_end_silence_sec: float
     chunk_ms: int
@@ -327,6 +328,7 @@ class ListendSettings:
             off_transcribe_cooldown_sec=env_float(
                 "LISTEND_OFF_TRANSCRIBE_COOLDOWN_SEC", 0.0
             ),
+            wake_suppression_sec=env_float("LISTEND_WAKE_SUPPRESSION_SEC", 2.0),
             silence_timeout_sec=env_float("LISTEND_SILENCE_TIMEOUT_SEC", 30.0),
             session_end_silence_sec=env_float("LISTEND_SESSION_END_SILENCE_SEC", 3.0),
             chunk_ms=env_int("LISTEND_CHUNK_MS", 80),
@@ -365,6 +367,7 @@ class ListendService:
         self.session_text_chunks: list[str] = []
         self.wake_ack_pending = False
         self.last_off_transcribe_at = 0.0
+        self.last_wake_ack_at = 0.0
         self.chunk_index = 0
 
         self.vad_model = load_silero_vad()
@@ -860,14 +863,13 @@ class ListendService:
         if self.state == ListenState.OFF:
             self.last_off_transcribe_at = now
             if wake_hit:
-                # 自分の発話したウェイクワードのみの場合は無視（ループ防止）
+                # ウェイクワードのみで構成される場合は無視（ループ防止）
                 without_wake = self._remove_words(transcription, self.settings.wake_words)
                 without_wake_normalized = " ".join(without_wake.split()).strip()
                 if not without_wake_normalized:
                     logging.info("wake word detected but transcription contains only wake words; ignoring to prevent loop")
                     return
                 # ウェイクワード検出時はACK発話してディスパッチ
-                # transcriptionを保持して、wake word検出時はACK発話してディスパッチ
                 logging.info("wake word detected in OFF segment; dispatching with text")
                 self._set_state(ListenState.ON, "wake word detected in OFF segment")
                 self._append_session_text(transcription)
@@ -945,6 +947,8 @@ class ListendService:
                 )
         logging.info("dispatch session (%s): %s", reason, text)
         self._dispatch(text)
+        # エージェント発話後のタイムスタンプを更新（ループ防止用）
+        self.last_wake_ack_at = time.monotonic()
 
     def _emit_chunk_debug(
         self,
@@ -1234,7 +1238,11 @@ class ListendService:
 
     def _play_wake_ack(self) -> bool:
         word = self.settings.wake_ack_word.strip()
-        return self._play_feedback_word(word, label="wake ack")
+        result = self._play_feedback_word(word, label="wake ack")
+        if result:
+            # システム発話後のタイムスタンプを更新（ループ防止用）
+            self.last_wake_ack_at = time.monotonic()
+        return result
 
     def _play_wake_prompt_word(self) -> bool:
         """ウェイクワード検出時の即時フィードバック（はい）を発話"""
