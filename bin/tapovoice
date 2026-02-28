@@ -91,5 +91,5 @@ curl -s -X POST "$URL" >/dev/null 2>&1 || {
 # rm -f "$TMP_WAV"
 (sleep 60; rm -f "$TMP_WAV") >/dev/null 2>&1 &
 
-echo "送信完了！ $STREAM_NAME のスピーカーから音が出るはずです♡"
+# echo "送信完了！ $STREAM_NAME のスピーカーから音が出るはずです♡"
 # echo "聞こえなかったら、go2rtcのログ（-debugで起動）やTapoアプリの音量を確認してみてね。"

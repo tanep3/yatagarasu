@@ -1,9 +1,35 @@
 #!/bin/bash
 # ずんだもんが喋ります。
 
-# VOICEVOXエンジンのURLを設定します
-VOICEVOX_ENGINE_HOST="127.0.0.1" #ご自身の環境にあわせて変更してください。
-VOICEVOX_ENGINE_PORT="50021"
+# .envファイルから環境変数を読み込む
+load_env_file() {
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local project_root="$(dirname "$script_dir")"
+    local workspace="${YATAGARASU_CWD:-$project_root/workspace}"
+    local env_file=""
+
+    # workspace/.envを優先、なければプロジェクトルートの.env
+    if [[ -f "${workspace}/.env" ]]; then
+        env_file="${workspace}/.env"
+    elif [[ -f "${project_root}/.env" ]]; then
+        env_file="${project_root}/.env"
+    fi
+
+    if [[ -f "${env_file}" ]]; then
+        while IFS='=' read -r key value; do
+            [[ "${key}" =~ ^#.*$ ]] && continue
+            [[ -z "${key}" ]] && continue
+            value=$(echo "${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+            [[ -z "${!key}" ]] && export "${key}=${value}"
+        done < "${env_file}"
+    fi
+}
+
+load_env_file
+
+# VOICEVOXエンジンのURLを設定します（.envで設定可能）
+VOICEVOX_ENGINE_HOST="${VOICEVOX_ENGINE_HOST:-127.0.0.1}"
+VOICEVOX_ENGINE_PORT="${VOICEVOX_ENGINE_PORT:-50021}"
 VOICEVOX_ENGINE_URL="http://${VOICEVOX_ENGINE_HOST}:${VOICEVOX_ENGINE_PORT}"
 
 OUTPUT=""
@@ -545,7 +571,7 @@ done < "$TEXTS"
 wait
 
 # すべての音声ファイルを結合して出力する
-echo "バックグラウンド処理が終了しました。出力します。" >&2
+# echo "バックグラウンド処理が終了しました。出力します。" >&2
 log "バックグラウンド処理が終了しました。出力します。"
 # FFMPEG用のリストファイルを作成
 FFMPEG_LIST_FILE="$(make_tempfile)"
@@ -563,7 +589,7 @@ if [ "$USE_STDOUT" == true ]; then
         echo "エラー: ファイル出力に失敗しました。" >&2
         log "エラー: ファイル出力に失敗しました。[code:$?]"
     fi
-    echo "音声を標準出力しました。" >&2
+    # echo "音声を標準出力しました。" >&2
     log "音声を標準出力しました。"
 fi
 
