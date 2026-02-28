@@ -865,7 +865,9 @@ class ListendService:
             if wake_hit:
                 # ウェイクワードのみで構成される場合は無視（ループ防止）
                 without_wake = self._remove_words(transcription, self.settings.wake_words)
-                without_wake_normalized = " ".join(without_wake.split()).strip()
+                # 読点・句点等の記号も削除してチェック
+                without_wake_clean = re.sub(r"[、。,.!！?？「」『』（）()\[\]{}\"'` 　]+", "", without_wake)
+                without_wake_normalized = " ".join(without_wake_clean.split()).strip()
                 if not without_wake_normalized:
                     logging.info("wake word detected but transcription contains only wake words; ignoring to prevent loop")
                     return
