@@ -47,4 +47,4 @@ export TAPO_HOST="${TAPO_HOST:-192.168.0.132}"
 export TAPO_USER="${TAPO_USER:-admin}"
 
 # uv経由でPythonスクリプトを実行
-cd "${PYTHON_DIR}" && "${PYTHON_DIR}/.venv/bin/python" "${SCRIPT_DIR}/ptz_control" "$@"
+uv run "${SCRIPT_DIR}/ptz_control" "$@"

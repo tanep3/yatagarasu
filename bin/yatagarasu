@@ -1,16 +1,44 @@
 #!/bin/bash
 # Yatagarasu - 八咫烏: Claude Code ずんだもん発声スクリプト
 # Claude Codeにプロンプトを渡し、その応答をずんだもんが喋ります
-
-# デフォルト値
-MODEL="haiku"
-SPEAKER="68"
+# SemanticMemoryによる記憶機能付き
 
 # スクリプトのディレクトリを取得
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # 呼び出し元のワーキングディレクトリを保存（再帰呼び出し用）
 export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
+
+# .envファイルから環境変数を読み込む
+load_env_file() {
+    local project_root="$(dirname "$SCRIPT_DIR")"
+    local workspace="${YATAGARASU_CWD:-$project_root/workspace}"
+    local env_file=""
+
+    # workspace/.envを優先、なければプロジェクトルートの.env
+    if [[ -f "${workspace}/.env" ]]; then
+        env_file="${workspace}/.env"
+    elif [[ -f "${project_root}/.env" ]]; then
+        env_file="${project_root}/.env"
+    fi
+
+    if [[ -f "${env_file}" ]]; then
+        while IFS='=' read -r key value; do
+            [[ "${key}" =~ ^#.*$ ]] && continue
+            [[ -z "${key}" ]] && continue
+            value=$(echo "${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+            [[ -z "${!key}" ]] && export "${key}=${value}"
+        done < "${env_file}"
+    fi
+}
+
+load_env_file
+
+# デフォルト値（.envで設定可能）
+MODEL="${YATAGARASU_MODEL:-haiku}"
+SPEAKER="${YATAGARASU_SPEAKER:-68}"
+# SemanticMemory設定
+MEMORY_ENABLED="${YATAGARASU_MEMORY_ENABLED:-true}"
 
 # ヘルプメッセージ
 usage() {
@@ -29,7 +57,13 @@ usage() {
     echo "                           68: あいえるたん" >&2
     echo "                           0: 四国めたん" >&2
     echo "                           1: ずんだもん" >&2
+    echo "  --no-memory            記憶機能を無効化" >&2
     echo "  -h, --help             このヘルプメッセージを表示" >&2
+    echo "" >&2
+    echo "環境変数 (.env):" >&2
+    echo "  SEMANTIC_MEMORY_ENABLED      記憶機能の有効/無効 (デフォルト: true)" >&2
+    echo "  SEMANTIC_MEMORY_RECENT_LIMIT 過去の文脈取得件数 (デフォルト: 3)" >&2
+    echo "  SEMANTIC_MEMORY_RECALL_LIMIT 関連知識取得件数 (デフォルト: 3)" >&2
     echo "" >&2
     echo "使用例:" >&2
     echo "  $0 \"今日は天気がいいから、公園とかに行くと気持ちいいかな？\"" >&2
@@ -60,6 +94,10 @@ while [[ $# -gt 0 ]]; do
                 usage
             fi
             ;;
+        --no-memory)
+            MEMORY_ENABLED="false"
+            shift
+            ;;
         -h|--help)
             usage
             ;;
@@ -89,7 +127,37 @@ if [ -z "$PROMPT" ]; then
     exit 1
 fi
 
-# Claude Codeの応答を取得し、ずんだもんで喋らせる
-# YATAGARASU_CWDを渡すことで、再帰呼び出し時も正しい.envを見つけられる
-YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" --permission-mode bypassPermissions | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"
-# MAX_THINKING_TOKENS=0 YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"
+# 記憶コンテキストを取得
+MEMORY_CONTEXT=""
+if [[ "$MEMORY_ENABLED" == "true" ]]; then
+    MEMORY_CONTEXT=$("$SCRIPT_DIR/recall-context.sh" "$PROMPT" 2>/dev/null) || MEMORY_CONTEXT=""
+fi
+
+# システムプロンプトを構築
+SYSTEM_PROMPT="$PROMPT"
+
+if [[ -n "$MEMORY_CONTEXT" ]]; then
+    # 記憶コンテキストをシステムプロンプトに追加
+    SYSTEM_PROMPT=$(cat <<EOF
+
+以下は過去の会話の記憶と関連知識です。これらを参考にしつつ、現在のプロンプトに応答してください。
+
+$MEMORY_CONTEXT
+
+---
+現在のプロンプト: $PROMPT
+EOF
+)
+fi
+
+# Claude Codeの応答を取得
+RESPONSE=$(YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$SYSTEM_PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" --permission-mode bypassPermissions 2>/dev/null)
+
+# 応答を保存してずんだもんで喋らせる
+echo "$RESPONSE" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"
+
+# 会話を記憶に保存
+if [[ "$MEMORY_ENABLED" == "true" ]] && [[ -n "$RESPONSE" ]]; then
+    CONVERSATION="[user]${PROMPT}"$'\n'"[agent]${RESPONSE}"
+    "$SCRIPT_DIR/memorize.sh" "$CONVERSATION" --no-summarize >/dev/null 2>&1 || true
+fi

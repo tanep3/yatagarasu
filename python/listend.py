@@ -52,6 +52,7 @@ _INITIAL_DATA_PROBE_SEC = 5.0
 
 class ListenState(str, Enum):
     OFF = "OFF"
+    WAKE_DETECTED = "WAKE_DETECTED"
     ON = "ON"
 
 
@@ -164,6 +165,7 @@ class ListendSettings:
     reazon_precision: str
     reazon_language: str
     wake_words: tuple[str, ...]
+    wake_prompt_word: str
     stop_words: tuple[str, ...]
     vad_threshold: float
     min_segment_sec: float
@@ -227,6 +229,8 @@ class ListendSettings:
                 "LISTEND_WAKE_WORDS is required "
                 "(comma-separated words, e.g. ヤタガラス)."
             )
+
+        wake_prompt_word = os.getenv("LISTEND_WAKE_PROMPT_WORD", "はい").strip()
 
         stop_words = env_csv("LISTEND_STOP_WORDS", ())
         if not stop_words:
@@ -316,6 +320,7 @@ class ListendSettings:
             reazon_precision=reazon_precision,
             reazon_language=reazon_language,
             wake_words=wake_words,
+            wake_prompt_word=wake_prompt_word,
             stop_words=stop_words,
             vad_threshold=env_float("LISTEND_VAD_THRESHOLD", 0.5),
             min_segment_sec=env_float("LISTEND_MIN_SEGMENT_SEC", 0.35),
@@ -770,14 +775,13 @@ class ListendService:
                 )
             )
 
-        if idle_sec >= self.settings.silence_timeout_sec:
-            if self.session_text_chunks:
-                self._dispatch_session(reason="flush before OFF timeout")
+        # セッションが空（ウェイク後無発話）またはタイムアウトでOFFに戻る
+        if not self.session_text_chunks or idle_sec >= self.settings.silence_timeout_sec:
             self._set_state(
                 ListenState.OFF,
                 reason=(
-                    f"silence timeout ({idle_sec:.1f}s >= "
-                    f"{self.settings.silence_timeout_sec:.1f}s)"
+                    f"cancel session (idle_sec={idle_sec:.1f}s "
+                    f"chunks={len(self.session_text_chunks)})"
                 ),
             )
 
@@ -856,18 +860,18 @@ class ListendService:
         if self.state == ListenState.OFF:
             self.last_off_transcribe_at = now
             if wake_hit:
-                # 前置きは切り捨てず、wakeを含むセグメント全体を採用する。
+                # ウェイクワード検出時はACK発話してディスパッチ
+                # transcriptionを保持して、wake word検出時はACK発話してディスパッチ
+                logging.info("wake word detected in OFF segment; dispatching with text")
                 self._set_state(ListenState.ON, "wake word detected in OFF segment")
                 self._append_session_text(transcription)
+                # 無音検出時に即時ディスパッチするため、短いタイマー設定
+                self.last_voice_at = time.monotonic() - self.settings.session_end_silence_sec + 0.5
             return
 
         if stop_hit:
-            cleaned = self._remove_words(transcription, self.settings.stop_words).strip()
-            if cleaned:
-                self._append_session_text(cleaned)
-            if self.session_text_chunks:
-                self._dispatch_session(reason="stop word detected")
-            self._set_state(ListenState.OFF, reason="stop word detected")
+            # stop word検出時はキャンセルしてOFFに戻る（ディスパッチしない）
+            self._set_state(ListenState.OFF, reason="stop word detected (cancel)")
             return
 
         if wake_hit:
@@ -907,7 +911,9 @@ class ListendService:
             self.session_text_chunks.clear()
             self.wake_ack_pending = False
             if old_state != new_state:
-                self._play_standby_word()
+                # ストップワード検出時のみ「ストップ」を発話（無音タイムアウト時は発話しない）
+                if "stop word detected" in reason:
+                    self._play_standby_word()
 
         if old_state != new_state:
             logging.info("state transition: %s -> %s (%s)", old_state, new_state, reason)
@@ -1094,6 +1100,12 @@ class ListendService:
         if self.whisper_model is None:
             logging.error("faster-whisper backend is not initialized")
             return ""
+
+        # initial_promptでウェイクワードをモデルに伝えて検出率向上
+        if self.settings.wake_words and "initial_prompt" not in kwargs:
+            wake_prompt = "、".join(self.settings.wake_words)
+            kwargs["initial_prompt"] = f"次の単語を聞き取ってください: {wake_prompt}"
+
         segments, _ = self.whisper_model.transcribe(audio_f32, **kwargs)
         texts = [
             segment.text.strip()
@@ -1217,6 +1229,11 @@ class ListendService:
     def _play_wake_ack(self) -> bool:
         word = self.settings.wake_ack_word.strip()
         return self._play_feedback_word(word, label="wake ack")
+
+    def _play_wake_prompt_word(self) -> bool:
+        """ウェイクワード検出時の即時フィードバック（はい）を発話"""
+        word = self.settings.wake_prompt_word.strip()
+        return self._play_feedback_word(word, label="wake prompt")
 
     def _play_standby_word(self) -> bool:
         word = self.settings.standby_word.strip()
