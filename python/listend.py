@@ -185,6 +185,7 @@ class ListendSettings:
     wake_ack_timeout_sec: float
     wake_ack_zunda_cmd: str
     wake_ack_tapovoice_cmd: str
+    whisper_initial_prompt_enabled: bool
     ffmpeg_bin: str
     reconnect_delay_sec: float
     max_reconnect_attempts: int
@@ -343,6 +344,7 @@ class ListendSettings:
             wake_ack_timeout_sec=env_float("LISTEND_WAKE_ACK_TIMEOUT_SEC", 8.0),
             wake_ack_zunda_cmd=wake_ack_zunda_cmd,
             wake_ack_tapovoice_cmd=wake_ack_tapovoice_cmd,
+            whisper_initial_prompt_enabled=os.getenv("LISTEND_WHISPER_INITIAL_PROMPT_ENABLED", "true").strip().lower() in ("true", "1", "yes"),
             ffmpeg_bin=os.getenv("LISTEND_FFMPEG_BIN", "ffmpeg").strip() or "ffmpeg",
             reconnect_delay_sec=env_float("LISTEND_RECONNECT_DELAY_SEC", 3.0),
             max_reconnect_attempts=env_int("LISTEND_MAX_RECONNECT_ATTEMPTS", 0),
@@ -1113,8 +1115,8 @@ class ListendService:
             logging.error("faster-whisper backend is not initialized")
             return ""
 
-        # initial_promptでウェイクワードをモデルに伝えて検出率向上
-        if self.settings.wake_words and "initial_prompt" not in kwargs:
+        # initial_promptでウェイクワードをモデルに伝えて検出率向上（設定でON/OFF可能）
+        if self.settings.whisper_initial_prompt_enabled and self.settings.wake_words and "initial_prompt" not in kwargs:
             wake_prompt = "、".join(self.settings.wake_words)
             kwargs["initial_prompt"] = f"次の単語を聞き取ってください: {wake_prompt}"
 
