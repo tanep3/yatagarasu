@@ -74,6 +74,23 @@ claude -p "hello" --model haiku
 6. Dockerサービス（`voicevox_engine` / `SemanticMemory` / `searxng`）起動
 7. `listend.py`（user systemd）起動
 
+## 診断
+
+実行環境の状態確認には `doctor` サブコマンドを使います。
+
+```bash
+bin/yatagarasu doctor
+bin/yatagarasu doctor --verbose
+```
+
+確認対象:
+- `.env` 読み込みとGit除外状態
+- Codex CLI / Claude Code / opencode
+- VOICEVOX / go2rtc
+- `zunda` / `tapovoice` / `ffmpeg`
+- `yatagarasu.service` / `go2rtc.service`
+- 直近ログのエラー傾向
+
 ## 実運用設定の扱い
 
 `workspace/.env` はカメラ認証情報や実運用モデルなどの固有設定を含むため、Git管理しません。

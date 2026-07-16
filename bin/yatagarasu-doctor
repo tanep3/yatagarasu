@@ -1,0 +1,355 @@
+#!/bin/bash
+# Yatagarasu Doctor - runtime environment diagnostics
+
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
+if [[ "$YATAGARASU_CWD" == "$PROJECT_ROOT" && -d "$PROJECT_ROOT/workspace" ]]; then
+    export YATAGARASU_CWD="$PROJECT_ROOT/workspace"
+fi
+
+VERBOSE=false
+CHECK_LOGS=true
+CHECK_SERVICES=true
+FAIL_COUNT=0
+WARN_COUNT=0
+ENV_FILE=""
+
+usage() {
+    cat <<EOF
+使用法: yatagarasu doctor [オプション]
+
+オプション:
+  --verbose       詳細情報を表示
+  --no-logs       systemdログ確認をスキップ
+  --no-services   systemdサービス確認をスキップ
+  -h, --help      ヘルプを表示
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --verbose)
+            VERBOSE=true
+            shift
+            ;;
+        --no-logs)
+            CHECK_LOGS=false
+            shift
+            ;;
+        --no-services)
+            CHECK_SERVICES=false
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "不明なオプション: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+load_env_file() {
+    local workspace="${YATAGARASU_CWD:-$PROJECT_ROOT/workspace}"
+    local env_file=""
+
+    if [[ -f "${workspace}/.env" ]]; then
+        env_file="${workspace}/.env"
+    elif [[ -f "${PROJECT_ROOT}/.env" ]]; then
+        env_file="${PROJECT_ROOT}/.env"
+    fi
+
+    ENV_FILE="$env_file"
+
+    if [[ -f "$env_file" ]]; then
+        while IFS='=' read -r key value; do
+            [[ "$key" =~ ^#.*$ ]] && continue
+            [[ -z "$key" ]] && continue
+            value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
+            [[ -z "${!key:-}" ]] && export "${key}=${value}"
+        done < "$env_file"
+    fi
+}
+
+ok() {
+    printf '[OK]   %s\n' "$*"
+}
+
+warn() {
+    WARN_COUNT=$((WARN_COUNT + 1))
+    printf '[WARN] %s\n' "$*"
+}
+
+fail() {
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    printf '[FAIL] %s\n' "$*"
+}
+
+info() {
+    printf '[INFO] %s\n' "$*"
+}
+
+find_cmd() {
+    local name="$1"
+    local found
+
+    found="$(command -v "$name" 2>/dev/null || true)"
+    if [[ -n "$found" ]]; then
+        printf '%s' "$found"
+        return 0
+    fi
+
+    if [[ "$name" == "codex" ]]; then
+        for candidate in "$HOME"/.nvm/versions/node/*/bin/codex; do
+            if [[ -x "$candidate" ]]; then
+                printf '%s' "$candidate"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
+http_probe() {
+    local url="$1"
+    local timeout="${2:-2}"
+    python3 - "$url" "$timeout" <<'PY'
+import sys
+import urllib.error
+import urllib.request
+
+url = sys.argv[1]
+timeout = float(sys.argv[2])
+try:
+    with urllib.request.urlopen(url, timeout=timeout) as res:
+        body = res.read(160)
+        print(f"{res.status} {body.decode('utf-8', errors='ignore').strip()}")
+except Exception as exc:
+    print(str(exc), file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
+check_command() {
+    local label="$1"
+    local cmd="$2"
+    local path
+
+    if path="$(find_cmd "$cmd")"; then
+        ok "$label: $path"
+        return 0
+    fi
+
+    fail "$label: command not found ($cmd)"
+    return 1
+}
+
+check_executable() {
+    local label="$1"
+    local path="$2"
+
+    if [[ -x "$path" ]]; then
+        ok "$label: $path"
+    else
+        fail "$label: executable not found ($path)"
+    fi
+}
+
+check_git_env() {
+    local workspace="$1"
+    local env_path="${workspace}/.env"
+
+    if ! command -v git >/dev/null 2>&1; then
+        warn "git: command not found; .envの追跡状態を確認できません"
+        return
+    fi
+
+    if git -C "$PROJECT_ROOT" ls-files --error-unmatch "$env_path" >/dev/null 2>&1; then
+        fail "workspace/.env is tracked by git"
+        return
+    fi
+
+    if git -C "$PROJECT_ROOT" check-ignore -q "$env_path" 2>/dev/null; then
+        ok "workspace/.env: ignored by git"
+    else
+        warn "workspace/.env: not tracked, but not ignored"
+    fi
+}
+
+check_codex_model() {
+    local model="$1"
+    local cache="$HOME/.codex/models_cache.json"
+
+    if [[ -z "$model" ]]; then
+        info "codex model: Codex CLI default"
+        return
+    fi
+
+    if [[ ! -f "$cache" ]]; then
+        warn "codex model: $model (models_cache.json not found)"
+        return
+    fi
+
+    if python3 - "$cache" "$model" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cache = Path(sys.argv[1])
+target = sys.argv[2]
+data = json.loads(cache.read_text())
+models = data.get("models", [])
+sys.exit(0 if any(m.get("slug") == target for m in models) else 1)
+PY
+    then
+        ok "codex model: $model is in local cache"
+    else
+        warn "codex model: $model is not in local cache"
+    fi
+}
+
+print_header() {
+    cat <<EOF
+Yatagarasu Doctor
+=================
+EOF
+}
+
+load_env_file
+WORKSPACE="${YATAGARASU_CWD:-$PROJECT_ROOT/workspace}"
+ENGINE="${YATAGARASU_ENGINE:-auto}"
+MODEL="${YATAGARASU_MODEL:-}"
+CODEX_MODEL="${YATAGARASU_CODEX_MODEL:-}"
+CODEX_REASONING_EFFORT="${YATAGARASU_CODEX_REASONING_EFFORT:-}"
+CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-true}"
+GO2RTC_HOST="${GO2RTC_HOST:-localhost}"
+GO2RTC_API_PORT="${GO2RTC_API_PORT:-1984}"
+VOICEVOX_ENGINE_HOST="${VOICEVOX_ENGINE_HOST:-127.0.0.1}"
+VOICEVOX_ENGINE_PORT="${VOICEVOX_ENGINE_PORT:-50021}"
+LISTEND_STT_BACKEND="${LISTEND_STT_BACKEND:-faster-whisper}"
+LISTEND_WAKE_WORDS="${LISTEND_WAKE_WORDS:-}"
+LISTEND_DISPATCH_TIMEOUT_SEC="${LISTEND_DISPATCH_TIMEOUT_SEC:-}"
+
+print_header
+
+if [[ -d "$WORKSPACE" ]]; then
+    ok "workspace: $WORKSPACE"
+else
+    fail "workspace not found: $WORKSPACE"
+fi
+
+if [[ -n "$ENV_FILE" ]]; then
+    ok ".env loaded: $ENV_FILE"
+else
+    warn ".env not found; defaults are in use"
+fi
+
+check_git_env "$WORKSPACE"
+
+info "engine: $ENGINE"
+info "model: ${MODEL:-"(default)"}"
+info "codex model: ${CODEX_MODEL:-"(Codex CLI default)"}"
+info "codex reasoning effort: ${CODEX_REASONING_EFFORT:-"(Codex CLI default)"}"
+info "codex bypass sandbox: $CODEX_BYPASS_SANDBOX"
+
+check_command "codex" "codex"
+check_command "claude" "claude" || true
+check_command "opencode" "opencode" || true
+check_command "ffmpeg" "ffmpeg"
+check_command "python3" "python3"
+check_executable "zunda" "$SCRIPT_DIR/zunda"
+check_executable "tapovoice" "$SCRIPT_DIR/tapovoice"
+
+case "$ENGINE" in
+    auto|codex|claude|opencode)
+        ok "engine value: $ENGINE"
+        ;;
+    *)
+        fail "engine value is unsupported: $ENGINE"
+        ;;
+esac
+
+check_codex_model "$CODEX_MODEL"
+
+if [[ -n "$CODEX_REASONING_EFFORT" ]]; then
+    case "$CODEX_REASONING_EFFORT" in
+        low|medium|high|xhigh)
+            ok "codex reasoning effort value: $CODEX_REASONING_EFFORT"
+            ;;
+        *)
+            warn "codex reasoning effort value is unsupported: $CODEX_REASONING_EFFORT"
+            ;;
+    esac
+fi
+
+VOICEVOX_URL="http://${VOICEVOX_ENGINE_HOST}:${VOICEVOX_ENGINE_PORT}/version"
+if output="$(http_probe "$VOICEVOX_URL" 2 2>&1)"; then
+    ok "VOICEVOX: $VOICEVOX_URL ($output)"
+else
+    warn "VOICEVOX: cannot reach $VOICEVOX_URL ($output)"
+fi
+
+GO2RTC_URL="http://${GO2RTC_HOST}:${GO2RTC_API_PORT}/api/streams"
+    if output="$(http_probe "$GO2RTC_URL" 2 2>&1)"; then
+    ok "go2rtc: $GO2RTC_URL"
+    if [[ "$VERBOSE" == true ]]; then
+        info "go2rtc response received (body hidden because it may contain stream credentials)"
+    fi
+else
+    warn "go2rtc: cannot reach $GO2RTC_URL ($output)"
+fi
+
+info "STT backend: $LISTEND_STT_BACKEND"
+info "wake words: ${LISTEND_WAKE_WORDS:-"(not set)"}"
+info "dispatch timeout: ${LISTEND_DISPATCH_TIMEOUT_SEC:-"(default)"}"
+
+if [[ "$CHECK_SERVICES" == true ]]; then
+    if command -v systemctl >/dev/null 2>&1; then
+        if state="$(systemctl --user is-active yatagarasu.service 2>/dev/null)"; then
+            ok "yatagarasu.service: $state"
+        else
+            warn "yatagarasu.service: ${state:-not active}"
+        fi
+
+        if state="$(systemctl --user is-active go2rtc.service 2>/dev/null)"; then
+            ok "go2rtc.service: $state"
+        else
+            warn "go2rtc.service: ${state:-not active}"
+        fi
+    else
+        warn "systemctl: command not found"
+    fi
+fi
+
+if [[ "$CHECK_LOGS" == true ]]; then
+    if command -v journalctl >/dev/null 2>&1; then
+        logs="$(journalctl --user -u yatagarasu.service -n 120 --no-pager 2>/dev/null || true)"
+        if [[ -z "$logs" ]]; then
+            warn "recent logs: no yatagarasu.service logs found"
+        elif grep -Eiq 'Codex CLI error|Claude Code.*failed|dispatch failed|dispatch timed out|Traceback|ERROR' <<<"$logs"; then
+            warn "recent logs: error-like entries found"
+            if [[ "$VERBOSE" == true ]]; then
+                grep -Ei 'Codex CLI error|Claude Code.*failed|dispatch failed|dispatch timed out|Traceback|ERROR' <<<"$logs" | tail -n 10
+            fi
+        else
+            ok "recent logs: no obvious errors in last 120 lines"
+        fi
+    else
+        warn "journalctl: command not found"
+    fi
+fi
+
+printf '\nSummary: %d fail, %d warn\n' "$FAIL_COUNT" "$WARN_COUNT"
+
+if [[ "$FAIL_COUNT" -gt 0 ]]; then
+    exit 1
+fi
+
+exit 0

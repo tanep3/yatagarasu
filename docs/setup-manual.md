@@ -320,6 +320,17 @@ loginctl enable-linger "$USER"
 
 ## 8. 動作確認（最短ルート）
 
+## 8.0 doctor
+
+まず環境診断を実行します。
+
+```bash
+bin/yatagarasu doctor
+bin/yatagarasu doctor --verbose
+```
+
+`doctor` は `.env`、AIエージェントCLI、VOICEVOX、go2rtc、音声送信コマンド、systemdサービス、直近ログを確認します。
+
 ## 8.1 音声出力チェーン
 
 ```bash

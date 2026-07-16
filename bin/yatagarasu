@@ -34,6 +34,11 @@ load_env_file() {
 
 load_env_file
 
+if [[ "${1:-}" == "doctor" ]]; then
+    shift
+    exec "$SCRIPT_DIR/yatagarasu-doctor" "$@"
+fi
+
 # デフォルト値（.envで設定可能）
 ENGINE="${YATAGARASU_ENGINE:-auto}"
 MODEL="${YATAGARASU_MODEL:-}"
@@ -54,6 +59,7 @@ usage() {
     echo "使用法: $0 [オプション] [テキスト]" >&2
     echo "" >&2
     echo "引数:" >&2
+    echo "  doctor                 実行環境を診断" >&2
     echo "  テキスト                 AIエージェントに送るプロンプト（オプション）" >&2
     echo "                          指定しない場合は標準入力から読み込み" >&2
     echo "" >&2

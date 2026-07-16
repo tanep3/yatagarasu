@@ -13,6 +13,7 @@
 - wake ack 音声はVOICEVOX APIで直接WAVを生成し、`tapovoice -i` で再生できるようになった
 - カメラスキルの保存先とPython起動を、リポジトリ固有の絶対パスに依存しない形へ整理
 - `workspace/.env` は運用固有設定としてGit管理しない方針をドキュメントに明記
+- `bin/yatagarasu-doctor` を追加し、`bin/yatagarasu doctor` から実行環境を診断できるようになった
 
 ## V1.1.0 (2026-02-28)
 
