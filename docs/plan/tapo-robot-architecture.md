@@ -7,12 +7,12 @@
 
 - 処理中心ではなく、構造中心で分割する。
 - トリガ層、推論層、デバイス層、記憶層を分離する。
-- AI（Claude Code）から呼ぶI/Fはコマンド契約で固定する。
+- AIエージェントCLI（Codex CLI / Claude Code / opencode）から呼ぶI/Fはコマンド契約で固定する。
 
 ## 2. 現状配置（実装準拠）
 
 - `python/listend.py`: 音声取得、VAD、STT、wake/stop状態管理、dispatch
-- `bin/yatagarasu`: `claude -p` 実行とTTS連携
+- `bin/yatagarasu`: AIエージェントCLI実行とTTS連携
 - `bin/zunda`: 音声合成
 - `bin/tapovoice`: go2rtc 経由で Tapo へ音声送信（既定 `tapo_tc70_speak`）
 - `external/go2rtc/go2rtc.yaml`: ストリーム設定（listen/speak 分離）
@@ -51,6 +51,10 @@ yatagarasu/
   workspace/
     .env
     .env.example
+    AGENTS.md
+    CLAUDE.md
+    .codex/skills/
+    .claude/skills/
     media/
   docs/
     plan/

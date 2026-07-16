@@ -293,7 +293,7 @@ check_input_enc() {
     else
         # テキストの場合はそのまま一時ファイルに保存
         printf '%s\n' "$input" > "$temp_file"
-        file_name="temp_file"
+        file_name="$temp_file"
     fi
     # エンコーディングを判定
     param="-i"
@@ -356,11 +356,12 @@ to_utf8() {
 parted_sentence() {
     # 標準入力の内容を1行ずつ読み込んで配列に格納
     while IFS= read -r line || [[ -n $line ]]; do
-        # 句読点、ピリオド、コロン、スペースで分割
-        IFS=$'、。、:： 　¥n' read -ra parts <<< "$line"
+        # 句読点、ピリオド、コロン、全角スペース、CRで分割（半角スペースは除外）
+        IFS=$'、。:：　\r\n' read -ra parts <<< "$line"
         for part in "${parts[@]}"; do
             # 句読点、スペース、コロン、ピリオド、改行コードを削除
-            trimmed=$(echo "$part" | sed 's/^\(\xEF\xBB\xBF\|[[:space:]。、:： 　.\n]\)*//g')
+            # CRも含めてトリミング
+            trimmed=$(echo "$part" | tr -d '\r' | sed 's/^\(\xEF\xBB\xBF\|[[:space:]。、:： 　.\\n]\)*//g')
             # 空行や不要な分割結果は無視して配列に追加
             if [ -n "$trimmed" ]; then
                 echo "$trimmed"
@@ -445,7 +446,7 @@ if [ "$USE_STDIN" == true ]; then
     # パイプやリダイレクトの入力
     if [ ! -t 0 ]; then
         std_input=$(make_tempfile)
-        cat > "$std_input"
+        tr -d '\r' > "$std_input"
         log "標準パイプ入力です"
     elif [ -t 0 ]; then
         echo "【標準入力モードです。テキストを入力してください（Ctrl+Dで終了）】" >&2
@@ -459,7 +460,7 @@ else
     if [ ! -t 0 ]; then
         log "標準パイプ入力です"
         std_input=$(make_tempfile)
-        cat > "$std_input"
+        tr -d '\r' > "$std_input"
     else
         log "標準入力はありません"
     fi

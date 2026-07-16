@@ -1,6 +1,6 @@
 #!/bin/bash
-# Yatagarasu - 八咫烏: Claude Code ずんだもん発声スクリプト
-# Claude Codeにプロンプトを渡し、その応答をずんだもんが喋ります
+# Yatagarasu - 八咫烏: AIエージェント ずんだもん発声スクリプト
+# AIエージェントにプロンプトを渡し、その応答をずんだもんが喋ります
 # SemanticMemoryによる記憶機能付き
 
 # スクリプトのディレクトリを取得
@@ -35,22 +35,34 @@ load_env_file() {
 load_env_file
 
 # デフォルト値（.envで設定可能）
-MODEL="${YATAGARASU_MODEL:-haiku}"
+ENGINE="${YATAGARASU_ENGINE:-auto}"
+MODEL="${YATAGARASU_MODEL:-}"
+CODEX_MODEL="${YATAGARASU_CODEX_MODEL:-}"
+CODEX_REASONING_EFFORT="${YATAGARASU_CODEX_REASONING_EFFORT:-}"
+CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-true}"
 SPEAKER="${SPEAKER_ID:-68}"
 # SemanticMemory設定
 MEMORY_ENABLED="${YATAGARASU_MEMORY_ENABLED:-true}"
+CODEX_CMD=""
+CLAUDE_CMD=""
+OPENCODE_CMD=""
+AGENT_ENGINE=""
+FOUND_CMD=""
 
 # ヘルプメッセージ
 usage() {
     echo "使用法: $0 [オプション] [テキスト]" >&2
     echo "" >&2
     echo "引数:" >&2
-    echo "  テキスト                 Claudeに送るプロンプト（オプション）" >&2
+    echo "  テキスト                 AIエージェントに送るプロンプト（オプション）" >&2
     echo "                          指定しない場合は標準入力から読み込み" >&2
     echo "" >&2
     echo "オプション:" >&2
-    echo "  -m, --model MODEL      Claudeモデル (デフォルト: haiku)" >&2
-    echo "                         利用可能なモデル: haiku, sonnet, opus" >&2
+    echo "  -e, --engine ENGINE    実行エンジン (auto, codex, claude, opencode)" >&2
+    echo "                         デフォルト: auto" >&2
+    echo "  -m, --model MODEL      モデル名" >&2
+    echo "                         Claude: haiku, sonnet, opus など" >&2
+    echo "                         Codex: 未指定時はCodex CLI設定を使用" >&2
     echo "  -s, --speaker ID       ずんだもんスピーカーID (SPEAKER_ID優先)" >&2
     echo "                         主なスピーカー:" >&2
     echo "                           46: 小夜/SAYO" >&2
@@ -61,7 +73,12 @@ usage() {
     echo "  -h, --help             このヘルプメッセージを表示" >&2
     echo "" >&2
     echo "環境変数 (.env):" >&2
-    echo "  SEMANTIC_MEMORY_ENABLED      記憶機能の有効/無効 (デフォルト: true)" >&2
+    echo "  YATAGARASU_ENGINE            実行エンジン (auto/codex/claude/opencode)" >&2
+    echo "  YATAGARASU_MODEL             エンジンに渡すモデル名" >&2
+    echo "  YATAGARASU_CODEX_MODEL       Codex CLI用モデル名 (YATAGARASU_MODELより優先)" >&2
+    echo "  YATAGARASU_CODEX_REASONING_EFFORT Codex CLI推論強度 (low/medium/high/xhigh)" >&2
+    echo "  YATAGARASU_CODEX_BYPASS_SANDBOX Codexの承認・サンドボックスをバイパス (デフォルト: true)" >&2
+    echo "  YATAGARASU_MEMORY_ENABLED    記憶機能の有効/無効 (デフォルト: true)" >&2
     echo "  SEMANTIC_MEMORY_RECENT_LIMIT 過去の文脈取得件数 (デフォルト: 3)" >&2
     echo "  SEMANTIC_MEMORY_RECALL_LIMIT 関連知識取得件数 (デフォルト: 3)" >&2
     echo "" >&2
@@ -76,6 +93,15 @@ usage() {
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -e|--engine)
+            if [ -n "$2" ] && [[ "$2" != -* ]]; then
+                ENGINE="$2"
+                shift 2
+            else
+                echo "エラー: -e オプションにはエンジン名が必要です。" >&2
+                usage
+            fi
+            ;;
         -m|--model)
             if [ -n "$2" ] && [[ "$2" != -* ]]; then
                 MODEL="$2"
@@ -150,11 +176,180 @@ EOF
 )
 fi
 
-# Claude Codeの応答を取得
-RESPONSE=$(YATAGARASU_CWD="$YATAGARASU_CWD" claude -p "$SYSTEM_PROMPT" --model "$MODEL" --allowedTools "Read,Edit,Bash" --permission-mode bypassPermissions 2>/dev/null)
+find_cmd() {
+    local name="$1"
+    local found=""
+    FOUND_CMD=""
 
-# 応答を保存してずんだもんで喋らせる
-echo "$RESPONSE" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"
+    found="$(command -v "$name" 2>/dev/null || true)"
+    if [[ -n "$found" ]]; then
+        FOUND_CMD="$found"
+        return 0
+    fi
+
+    if [[ "$name" == "codex" ]]; then
+        for candidate in "$HOME"/.nvm/versions/node/*/bin/codex; do
+            if [[ -x "$candidate" ]]; then
+                PATH="$(dirname "$candidate"):$PATH"
+                export PATH
+                FOUND_CMD="$candidate"
+                return 0
+            fi
+        done
+    fi
+
+    return 1
+}
+
+resolve_engine() {
+    case "$ENGINE" in
+        auto)
+            if find_cmd codex; then
+                CODEX_CMD="$FOUND_CMD"
+                AGENT_ENGINE="codex"
+            elif find_cmd claude; then
+                CLAUDE_CMD="$FOUND_CMD"
+                AGENT_ENGINE="claude"
+            elif find_cmd opencode; then
+                OPENCODE_CMD="$FOUND_CMD"
+                AGENT_ENGINE="opencode"
+            else
+                echo "エラー: codex / claude / opencode のいずれも見つかりません。" >&2
+                return 1
+            fi
+            ;;
+        codex)
+            find_cmd codex || {
+                echo "エラー: codex コマンドが見つかりません。" >&2
+                return 1
+            }
+            CODEX_CMD="$FOUND_CMD"
+            AGENT_ENGINE="$ENGINE"
+            ;;
+        claude)
+            find_cmd claude || {
+                echo "エラー: claude コマンドが見つかりません。" >&2
+                return 1
+            }
+            CLAUDE_CMD="$FOUND_CMD"
+            AGENT_ENGINE="$ENGINE"
+            ;;
+        opencode)
+            find_cmd opencode || {
+                echo "エラー: opencode コマンドが見つかりません。" >&2
+                return 1
+            }
+            OPENCODE_CMD="$FOUND_CMD"
+            AGENT_ENGINE="$ENGINE"
+            ;;
+        *)
+            echo "エラー: 未対応のエンジンです: $ENGINE" >&2
+            return 1
+            ;;
+    esac
+}
+
+run_codex() {
+    local output_file
+    local error_file
+    local codex_model
+    local codex_args
+    local sandbox_args
+    local status
+    output_file="$(mktemp)"
+    error_file="$(mktemp)"
+    codex_model="$CODEX_MODEL"
+    sandbox_args=(--dangerously-bypass-approvals-and-sandbox)
+
+    if [[ "$CODEX_BYPASS_SANDBOX" == "false" ]]; then
+        sandbox_args=(--sandbox workspace-write)
+    fi
+
+    if [[ -z "$codex_model" && -n "$MODEL" ]]; then
+        case "$MODEL" in
+            haiku|sonnet|opus)
+                echo "警告: Codex CLIではClaudeモデル名 '$MODEL' を使わず、Codex CLIの既定モデルを使用します。" >&2
+                ;;
+            *)
+                codex_model="$MODEL"
+                ;;
+        esac
+    fi
+
+    codex_args=(exec -C "$YATAGARASU_CWD" "${sandbox_args[@]}" --color never)
+
+    if [[ -n "$CODEX_REASONING_EFFORT" ]]; then
+        case "$CODEX_REASONING_EFFORT" in
+            low|medium|high|xhigh)
+                codex_args+=(-c "model_reasoning_effort=\"$CODEX_REASONING_EFFORT\"")
+                ;;
+            *)
+                echo "警告: 未対応のCodex推論強度 '$CODEX_REASONING_EFFORT' は無視します。" >&2
+                ;;
+        esac
+    fi
+
+    if [[ -n "$codex_model" ]]; then
+        codex_args+=(-m "$codex_model")
+    fi
+
+    codex_args+=(-o "$output_file" "$SYSTEM_PROMPT")
+
+    YATAGARASU_CWD="$YATAGARASU_CWD" "$CODEX_CMD" "${codex_args[@]}" \
+        </dev/null >/dev/null 2>"$error_file"
+    status=$?
+
+    if [[ $status -ne 0 ]]; then
+        if [[ -s "$error_file" ]]; then
+            echo "Codex CLI error:" >&2
+            tail -n 20 "$error_file" >&2
+        fi
+        rm -f "$output_file"
+        rm -f "$error_file"
+        return "$status"
+    fi
+
+    cat "$output_file"
+    rm -f "$output_file"
+    rm -f "$error_file"
+}
+
+run_claude() {
+    local claude_model="${MODEL:-haiku}"
+    YATAGARASU_CWD="$YATAGARASU_CWD" "$CLAUDE_CMD" -p "$SYSTEM_PROMPT" \
+        --model "$claude_model" \
+        --allowedTools "Read,Edit,Bash" \
+        --permission-mode bypassPermissions
+}
+
+run_opencode() {
+    YATAGARASU_CWD="$YATAGARASU_CWD" "$OPENCODE_CMD" run "$SYSTEM_PROMPT"
+}
+
+resolve_engine || exit 1
+case "$AGENT_ENGINE" in
+    codex)
+        RESPONSE="$(run_codex)" || {
+            echo "エラー: Codex CLIでの応答生成に失敗しました。" >&2
+            exit 1
+        }
+        ;;
+    claude)
+        RESPONSE="$(run_claude 2>/dev/null)" || {
+            echo "エラー: Claude Codeでの応答生成に失敗しました。" >&2
+            exit 1
+        }
+        ;;
+    opencode)
+        RESPONSE="$(run_opencode 2>/dev/null)" || {
+            echo "エラー: opencodeでの応答生成に失敗しました。" >&2
+            exit 1
+        }
+        ;;
+esac
+
+# 応答をずんだもんで喋らせる
+printf '%s\n' "$RESPONSE" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIPT_DIR/tapovoice"
 
 # 会話を記憶に保存
 if [[ "$MEMORY_ENABLED" == "true" ]] && [[ -n "$RESPONSE" ]]; then

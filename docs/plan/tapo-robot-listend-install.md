@@ -9,12 +9,12 @@
 - ワークスペース: 例 `workspace`（任意パス）
 - `ffmpeg` が利用可能
 - `uv` が利用可能
-- `claude`（Claude Code CLI）が利用可能
+- `codex`（Codex CLI）、`claude`（Claude Code CLI）、または `opencode` が利用可能
 - 実行時は `YATAGARASU_CWD=<workspace>` を指定する
 
 補足:
 - `LISTEND_DISPATCH_CMD` 未指定時は `<workspace親>/bin/yatagarasu` が使われる。
-- `bin/yatagarasu` は内部で `claude -p ...` を実行するため、`claude` の導入・認証が必要。
+- `bin/yatagarasu` は `YATAGARASU_ENGINE` に応じてAIエージェントCLIを実行するため、利用するCLIの導入・認証が必要。
 
 ### 1.1 サブモジュール同期（初回/更新時）
 
@@ -151,8 +151,8 @@ WantedBy=default.target
 ```
 
 注意:
-- `systemd --user` は通常 `.bashrc` を読まないため、`claude` が見つからない場合は unit 側で `Environment=PATH=...` を明示する。
-- 例: `claude` が `/home/<user>/.local/bin/claude` の場合、`/home/<user>/.local/bin` を PATH に含める。
+- `systemd --user` は通常 `.bashrc` を読まないため、`codex` / `claude` が見つからない場合は unit 側で `Environment=PATH=...` を明示する。
+- 例: CLIが `/home/<user>/.local/bin` や nvm 配下にある場合、そのディレクトリを PATH に含める。
 
 有効化:
 

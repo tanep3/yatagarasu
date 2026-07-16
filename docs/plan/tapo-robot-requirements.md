@@ -121,7 +121,8 @@
 ## 6. オーケストレーション実行要件
 
 - バッチ起動コマンド例:
-  - `claude -p "<prompt>" --model haiku --continue --allowedTools "Read,Edit,Bash"`
+  - `bin/yatagarasu --engine codex "<prompt>"`
+  - `bin/yatagarasu --engine claude -m haiku "<prompt>"`
 - 入力テンプレートには以下を含むこと。
 1. トリガ種別（voice/motion/cron）
 2. 文字起こし本文または検知要約

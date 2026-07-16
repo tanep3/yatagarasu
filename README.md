@@ -31,20 +31,32 @@ Tapo見守りカメラ（TC70/C200/C220等）をロボット化するための�
   - `SemanticMemory`
   - `searxng`（`tanechan-search` 用）
 
-## LLM実行基盤（Claude Code）
+## LLM実行基盤（Codex CLI / Claude Code / opencode）
 
-`bin/yatagarasu` は内部で **Claude Code CLI (`claude`)** を呼び出します。  
-そのため、このプロジェクトの対話実行には `claude` コマンドの導入・認証が必須です。
+`bin/yatagarasu` は内部でAIエージェントCLIを呼び出します。  
+現在は **Codex CLI (`codex`)**、**Claude Code CLI (`claude`)**、**opencode (`opencode`)** に対応しています。
 
-実際に使用している呼び出し形式（`bin/yatagarasu`）:
+`.env` の `YATAGARASU_ENGINE` で実行エンジンを選択できます。
 
 ```bash
-claude -p "<prompt>" --model "<haiku|sonnet|opus>" --allowedTools "Read,Edit,Bash"
+YATAGARASU_ENGINE="auto"    # auto / codex / claude / opencode
+YATAGARASU_MODEL=""         # Codexでは空ならCodex CLI設定を使用
+YATAGARASU_CODEX_MODEL=""   # Codex専用モデル指定
+YATAGARASU_CODEX_REASONING_EFFORT="" # low / medium / high / xhigh
 ```
 
 確認コマンド:
 
 ```bash
+codex --version
+codex exec "hello"
+```
+
+Claude Codeを使う場合:
+
+```bash
+YATAGARASU_ENGINE="claude"
+YATAGARASU_MODEL="haiku"
 claude --version
 claude -p "hello" --model haiku
 ```
@@ -55,12 +67,24 @@ claude -p "hello" --model haiku
 以下の順で進めてください。
 
 1. 前提条件の確認
-2. Claude Code CLI（`claude`）導入・認証確認
+2. Codex CLI（`codex`）またはClaude Code CLI（`claude`）導入・認証確認
 3. `.env` 設定
 4. `go2rtc`（user systemd）起動
 5. `Ollama`（host）導入・モデル取得
 6. Dockerサービス（`voicevox_engine` / `SemanticMemory` / `searxng`）起動
 7. `listend.py`（user systemd）起動
+
+## 実運用設定の扱い
+
+`workspace/.env` はカメラ認証情報や実運用モデルなどの固有設定を含むため、Git管理しません。
+共有・更新する設定キーは `workspace/.env.example` に追加し、実値は各環境の `workspace/.env` に反映します。
+
+運用環境で更新する前には、必要に応じて以下のように退避してください。
+
+```bash
+cp workspace/.env workspace/.env.local.backup
+git pull --ff-only
+```
 
 ## ライセンス
 

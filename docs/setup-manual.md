@@ -44,35 +44,56 @@ ffmpeg -version | head -n 1
 ollama --version
 ```
 
-## 1.2 Claude CLI
+## 1.2 AIエージェントCLI
 
-`bin/yatagarasu` は内部で **Claude Code CLI (`claude`)** を実行します。  
-そのため `claude` コマンドが使える状態である必要があります。
+`bin/yatagarasu` は内部でAIエージェントCLIを実行します。
+現在は **Codex CLI (`codex`)**、**Claude Code CLI (`claude`)**、**opencode (`opencode`)** に対応しています。
+`.env` の `YATAGARASU_ENGINE` で利用するエンジンを選択します。
 
-公式インストール（推奨）:
+Codex CLIを使う場合の確認:
+
+```bash
+codex --version
+codex exec "hello"
+```
+
+Claude Codeを使う場合の確認:
+
+```bash
+claude --version
+claude -p "hello" --model haiku
+```
+
+Claude Codeの公式インストール例:
 
 ```bash
 curl -fsSL https://claude.ai/install.sh | bash
 ```
 
-インストール後の確認:
-
-```bash
-claude --version
-```
-
-認証状態の確認（初回）:
-
-```bash
-claude
-```
-
-補足:
-- `PATH` 反映のため、シェル再起動または `source ~/.bashrc` などが必要な場合があります。
-
 重要:
 
-- `listend.py` から `bin/yatagarasu` を起動する場合、`yatagarasu-listend.service` を動かす **同一ユーザー** で `claude` の導入と認証を済ませてください。
+- `listend.py` から `bin/yatagarasu` を起動する場合、`yatagarasu-listend.service` を動かす **同一ユーザー** で、利用するCLIの導入と認証を済ませてください。
+- `systemd --user` は通常 `.bashrc` を読まないため、CLIがnvmやユーザー固有PATH配下にある場合は unit 側の `Environment=PATH=...` を確認してください。
+
+## 1.3 実運用設定を守る更新方針
+
+`workspace/.env` はカメラ認証情報、VOICEVOX接続先、利用モデルなどの固有設定を含むため、Git管理しません。
+リポジトリで管理するのは `workspace/.env.example` だけです。
+
+運用環境で更新する時の基本手順:
+
+```bash
+git status --short
+cp workspace/.env workspace/.env.local.backup
+git pull --ff-only
+diff -u workspace/.env.example workspace/.env.local.backup
+```
+
+`git pull` で固有設定を消さないための原則:
+- `workspace/.env` はコミットしない。
+- 変更が必要な設定キーは `workspace/.env.example` に追加し、実値は運用側の `.env` に手で反映する。
+- 実運用でだけ発生したコード修正は、先に開発用リポジトリへ移植してから運用側へ戻す。
+- もし過去に `.env` をGit追跡してしまった場合は、開発リポジトリ側で `git rm --cached workspace/.env` してから `.gitignore` で除外する。
 
 ## 2. リポジトリ取得
 
@@ -340,10 +361,10 @@ YATAGARASU_CWD="$(pwd)/workspace" LISTEND_LOG_LEVEL=DEBUG ./python/.venv/bin/pyt
 5. `tapovoice` で音が出ない
 - 対策: `tapo_tc70_speak` ストリーム定義、`go2rtc` APIポート（1984）を確認。
 
-6. `dispatch failed` / `dispatch timed out` で `claude` 関連エラーが出る
-- 対策: `which claude` と `claude --version` を、`yatagarasu-listend.service` 実行ユーザーで確認。
-- 対策: 手動で `bin/yatagarasu "test"` を実行して、`claude` 認証状態を確認。
-- 対策: `claude: command not found` の場合、unit に `Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin` を追加し、`daemon-reload` 後に再起動。
+6. `dispatch failed` / `dispatch timed out` でAIエージェントCLI関連エラーが出る
+- 対策: `which codex` / `codex --version`、または `which claude` / `claude --version` を、`yatagarasu-listend.service` 実行ユーザーで確認。
+- 対策: 手動で `bin/yatagarasu --engine codex "test"` または `bin/yatagarasu --engine claude "test"` を実行して、CLI認証状態を確認。
+- 対策: `codex: command not found` / `claude: command not found` の場合、unit に `Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin` を追加し、`daemon-reload` 後に再起動。
 
 7. `SemanticMemory` で要約だけ失敗する / `OLLAMA_URL` 接続エラー
 - 対策: ホストで `curl -s http://127.0.0.1:11434/api/tags` が成功するか確認。

@@ -1,5 +1,19 @@
 # 変更履歴 (Changelog)
 
+## Unreleased
+
+### 改善 (Improvements)
+
+- `bin/yatagarasu` が Codex CLI / Claude Code / opencode を選択実行できるようになった
+  - `YATAGARASU_ENGINE`
+  - `YATAGARASU_CODEX_MODEL`
+  - `YATAGARASU_CODEX_REASONING_EFFORT`
+  - `YATAGARASU_CODEX_BYPASS_SANDBOX`
+- Codex CLI向けの `workspace/AGENTS.md` と `workspace/.codex/skills/` を追加
+- wake ack 音声はVOICEVOX APIで直接WAVを生成し、`tapovoice -i` で再生できるようになった
+- カメラスキルの保存先とPython起動を、リポジトリ固有の絶対パスに依存しない形へ整理
+- `workspace/.env` は運用固有設定としてGit管理しない方針をドキュメントに明記
+
 ## V1.1.0 (2026-02-28)
 
 ### 新機能 (Features)
@@ -17,7 +31,10 @@
 **新しい設定項目 (.env):**
 ```bash
 # Yatagarasu設定
-YATAGARASU_MODEL="haiku"           # デフォルトのClaudeモデル
+YATAGARASU_ENGINE="auto"           # auto / codex / claude / opencode
+YATAGARASU_MODEL=""                # Codexでは空ならCodex CLI設定を使用
+YATAGARASU_CODEX_MODEL=""          # Codex CLI専用モデル
+YATAGARASU_CODEX_REASONING_EFFORT="" # Codex CLI推論強度
 YATAGARASU_SPEAKER="68"            # デフォルトの話者ID
 YATAGARASU_MEMORY_ENABLED="true"   # 記憶機能の有効/無効
 
@@ -87,7 +104,7 @@ memory_context:
 
 #### 基本機能
 - 音声認識によるウェイクワード検出
-- Claude Codeとの連携
+- AIエージェントCLIとの連携
 - ずんだもん音声合成
 - Tapo TC70カメラ制御（PTZ）
 - 視覚スキル（画像取得）

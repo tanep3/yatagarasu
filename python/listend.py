@@ -25,6 +25,9 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -1261,35 +1264,139 @@ class ListendService:
         if not word:
             return True
 
-        zunda_argv = shlex.split(self.settings.wake_ack_zunda_cmd)
         tapovoice_argv = shlex.split(self.settings.wake_ack_tapovoice_cmd)
-        if not zunda_argv:
-            logging.warning("%s skipped: zunda command is empty", label)
-            return False
         if not tapovoice_argv:
             logging.warning("%s skipped: tapovoice command is empty", label)
             return False
 
+        wav_path = self._synthesize_feedback_word(word, label)
+        if wav_path is not None:
+            try:
+                return self._play_feedback_wav(wav_path, tapovoice_argv, label)
+            finally:
+                try:
+                    wav_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+        return self._play_feedback_word_with_zunda(word, tapovoice_argv, label)
+
+    def _synthesize_feedback_word(self, word: str, label: str) -> Path | None:
+        host = os.getenv("VOICEVOX_ENGINE_HOST", "127.0.0.1").strip() or "127.0.0.1"
+        port = os.getenv("VOICEVOX_ENGINE_PORT", "50021").strip() or "50021"
+        base_url = f"http://{host}:{port}"
+        speaker = self.settings.wake_ack_speaker_id
+        timeout = max(1.0, self.settings.wake_ack_timeout_sec)
+
+        try:
+            query_params = urllib.parse.urlencode({"text": word, "speaker": speaker})
+            query_url = f"{base_url}/audio_query?{query_params}"
+            query_req = urllib.request.Request(query_url, method="POST")
+            with urllib.request.urlopen(query_req, timeout=timeout) as res:
+                query_json = res.read()
+
+            synth_url = f"{base_url}/synthesis?{urllib.parse.urlencode({'speaker': speaker})}"
+            synth_req = urllib.request.Request(
+                synth_url,
+                data=query_json,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(synth_req, timeout=timeout) as res:
+                wav_data = res.read()
+
+            if not wav_data:
+                logging.warning("%s direct synthesis returned empty audio", label)
+                return None
+
+            fd, raw_path = tempfile.mkstemp(
+                prefix="yatagarasu_feedback_",
+                suffix=".wav",
+                dir=str(self.settings.workspace_path),
+            )
+            with os.fdopen(fd, "wb") as f:
+                f.write(wav_data)
+            return Path(raw_path)
+        except (OSError, urllib.error.URLError, TimeoutError) as exc:
+            logging.warning("%s direct synthesis failed: %s", label, exc)
+            return None
+
+    def _play_feedback_wav(
+        self, wav_path: Path, tapovoice_argv: list[str], label: str
+    ) -> bool:
+        cmd = [*tapovoice_argv, "-i", str(wav_path)]
+        logging.info("%s via `%s`", label, " ".join(cmd))
+        try:
+            result = subprocess.run(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=os.environ.copy(),
+                timeout=max(1.0, self.settings.wake_ack_timeout_sec),
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            logging.warning("%s command not found: %s", label, exc)
+            return False
+        except subprocess.TimeoutExpired:
+            logging.warning(
+                "%s timed out after %.1fs",
+                label,
+                self.settings.wake_ack_timeout_sec,
+            )
+            return False
+
+        if result.returncode != 0:
+            logging.warning(
+                "%s tapovoice failed rc=%s stderr=%s",
+                label,
+                result.returncode,
+                (result.stderr or b"").decode("utf-8", errors="ignore").strip(),
+            )
+            return False
+        out_text = (result.stdout or b"").decode("utf-8", errors="ignore").strip()
+        if out_text:
+            logging.info("%s output: %s", label, out_text)
+        return True
+
+    def _play_feedback_word_with_zunda(
+        self, word: str, tapovoice_argv: list[str], label: str
+    ) -> bool:
+        zunda_argv = shlex.split(self.settings.wake_ack_zunda_cmd)
+        if not zunda_argv:
+            logging.warning("%s skipped: zunda command is empty", label)
+            return False
+
         zunda_cmd = [
             *zunda_argv,
-            word,
             "--stdout",
             "-s",
             self.settings.wake_ack_speaker_id,
         ]
-        logging.info("%s: '%s' via `%s | %s`", label, word, " ".join(zunda_cmd), " ".join(tapovoice_argv))
+        logging.info(
+            "%s: '%s' via `printf %%s\\\\n ... | %s | %s`",
+            label,
+            word,
+            " ".join(zunda_cmd),
+            " ".join(tapovoice_argv),
+        )
 
         zunda_proc: subprocess.Popen[bytes] | None = None
         tapovoice_proc: subprocess.Popen[bytes] | None = None
         try:
             zunda_proc = subprocess.Popen(
                 zunda_cmd,
+                stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=os.environ.copy(),
             )
             if zunda_proc.stdout is None:
                 raise RuntimeError("zunda stdout pipe is not available")
+            if zunda_proc.stdin is None:
+                raise RuntimeError("zunda stdin pipe is not available")
+            zunda_proc.stdin.write((word + "\n").encode("utf-8"))
+            zunda_proc.stdin.close()
             tapovoice_proc = subprocess.Popen(
                 tapovoice_argv,
                 stdin=zunda_proc.stdout,

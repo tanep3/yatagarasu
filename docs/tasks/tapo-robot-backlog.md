@@ -18,7 +18,7 @@
 
 - [ ] トリガ共通イベント `TriggerEvent` を定義する
 - [ ] prompt builder を実装し、文字起こしと記憶を統合する
-- [ ] `claude -p` 単発起動ラッパを実装する
+- [x] Codex CLI / Claude Code / opencode 対応の単発起動ラッパを実装する
 - [ ] AI出力から `speak` / `memory` スキル実行を行う
 
 ## Phase 4 記憶
