@@ -46,5 +46,14 @@ load_env_file
 export TAPO_HOST="${TAPO_HOST:-192.168.0.132}"
 export TAPO_USER="${TAPO_USER:-admin}"
 
-# uv経由でPythonスクリプトを実行
-uv run "${SCRIPT_DIR}/ptz_control" "$@"
+# スキル配下の仮想環境があればそれを優先する。
+# listend や Intent Router の実行環境と、カメラスキルの依存を分離しておく。
+SKILL_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SKILL_PYTHON="${SKILL_DIR}/.venv/bin/python"
+
+if [[ -x "${SKILL_PYTHON}" ]]; then
+    exec "${SKILL_PYTHON}" "${SCRIPT_DIR}/ptz_control" "$@"
+fi
+
+# 専用環境がない開発環境では従来どおり uv に任せる。
+exec uv run "${SCRIPT_DIR}/ptz_control" "$@"

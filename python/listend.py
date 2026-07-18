@@ -14,6 +14,7 @@ RTSP音声を常時監視し、以下を実行する。
 from __future__ import annotations
 
 import logging
+import json
 import math
 import os
 import re
@@ -37,6 +38,8 @@ import numpy as np
 import torch
 from faster_whisper import WhisperModel
 from silero_vad import get_speech_timestamps, load_silero_vad
+
+from intent_router import IntentRouter, RouterDecision
 
 DEFAULT_AUDIO_FILTER = "highpass=f=120,lowpass=f=5000"
 DEFAULT_SEGMENT_END_SILENCE_CHUNKS = 5
@@ -357,6 +360,162 @@ class ListendSettings:
         )
 
 
+@dataclass(frozen=True)
+class ActionResult:
+    action: str
+    ok: bool
+    stdout: str
+    stderr: str
+    elapsed_sec: float
+
+
+@dataclass(frozen=True)
+class RouterExecutionResult:
+    completed_without_llm: bool
+    executed_actions: tuple[ActionResult, ...]
+    image_path: str | None
+    recall_text: str | None
+    errors: tuple[str, ...]
+
+
+PTZ_ACTIONS = frozenset(
+    {
+        "move_camera_calibrate",
+        "move_camera_left",
+        "move_camera_right",
+        "move_camera_up",
+        "move_camera_down",
+    }
+)
+
+
+class PtzWorker:
+    def __init__(self, skill_root: Path, workspace_path: Path) -> None:
+        self.workspace_path = workspace_path
+        self.script = skill_root / "move-camera" / "scripts" / "ptz_worker"
+        self.python = skill_root / "move-camera" / ".venv" / "bin" / "python"
+        self.proc: subprocess.Popen[str] | None = None
+
+    def execute(self, action: str, timeout: float) -> ActionResult:
+        started = time.monotonic()
+        if not self._ensure_started(timeout):
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr="PTZ worker is not available",
+                elapsed_sec=time.monotonic() - started,
+            )
+
+        proc = self.proc
+        if proc is None or proc.stdin is None:
+            self.stop()
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr="PTZ worker stdin is not available",
+                elapsed_sec=time.monotonic() - started,
+            )
+
+        try:
+            proc.stdin.write(json.dumps({"action": action}) + "\n")
+            proc.stdin.flush()
+            payload = self._read_payload(timeout)
+        except Exception as exc:
+            self.stop()
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr=str(exc),
+                elapsed_sec=time.monotonic() - started,
+            )
+
+        if not payload:
+            self.stop()
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr=f"PTZ worker timed out after {timeout:.1f}s",
+                elapsed_sec=time.monotonic() - started,
+            )
+
+        ok = bool(payload.get("ok"))
+        return ActionResult(
+            action=action,
+            ok=ok,
+            stdout=str(payload.get("stdout", "")).strip(),
+            stderr=str(payload.get("stderr", "")).strip(),
+            elapsed_sec=time.monotonic() - started,
+        )
+
+    def _ensure_started(self, timeout: float) -> bool:
+        if self.proc is not None and self.proc.poll() is None:
+            return True
+        if not self.python.exists() or not self.script.exists():
+            return False
+
+        env = os.environ.copy()
+        env["YATAGARASU_CWD"] = str(self.workspace_path)
+        self.proc = subprocess.Popen(
+            [str(self.python), str(self.script)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+            bufsize=1,
+        )
+        payload = self._read_payload(timeout)
+        if payload and payload.get("type") == "ready" and payload.get("ok"):
+            logging.info("PTZ worker ready")
+            return True
+        error = payload.get("error") if payload else "startup timeout"
+        logging.warning("PTZ worker startup failed: %s", error)
+        self.stop()
+        return False
+
+    def _read_payload(self, timeout: float) -> dict[str, object]:
+        proc = self.proc
+        if proc is None or proc.stdout is None:
+            return {}
+
+        fd = proc.stdout.fileno()
+        ready, _, _ = select.select([fd], [], [], max(0.1, timeout))
+        if not ready:
+            return {}
+        line = proc.stdout.readline()
+        if not line:
+            return {}
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            return {"ok": False, "stderr": f"invalid PTZ worker response: {line.strip()}"}
+        return payload if isinstance(payload, dict) else {}
+
+    def stop(self) -> None:
+        proc = self.proc
+        self.proc = None
+        if proc is None:
+            return
+        if proc.poll() is not None:
+            return
+        try:
+            if proc.stdin is not None:
+                proc.stdin.write(json.dumps({"action": "stop"}) + "\n")
+                proc.stdin.flush()
+            proc.wait(timeout=1)
+        except Exception:
+            proc.terminate()
+            try:
+                proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=1)
+
+
 class ListendService:
     def __init__(self, settings: ListendSettings) -> None:
         self.settings = settings
@@ -381,6 +540,11 @@ class ListendService:
         self.reazon_audio_from_numpy: object | None = None
         self.reazon_transcribe: object | None = None
         self._init_stt_backend()
+        self.intent_router = self._init_intent_router()
+        skill_root = self.settings.workspace_path / ".codex" / "skills"
+        self.ptz_worker = PtzWorker(skill_root, self.settings.workspace_path)
+        if self.intent_router is not None and not self.intent_router.settings.dry_run:
+            self.ptz_worker._ensure_started(env_float("YATAGARASU_SBERT_MOVE_TIMEOUT_SEC", 8.0))
 
     def _init_stt_backend(self) -> None:
         if self.settings.stt_backend == "faster-whisper":
@@ -415,8 +579,16 @@ class ListendService:
             language=self.settings.reazon_language,
         )
 
+    def _init_intent_router(self) -> IntentRouter | None:
+        try:
+            return IntentRouter.from_env()
+        except Exception as exc:
+            logging.warning("SBERT Router initialization failed; disabled: %s", exc)
+            return None
+
     def request_stop(self) -> None:
         self.stop_requested = True
+        self.ptz_worker.stop()
 
     def _resolve_transports(self) -> list[str]:
         """auto モードの場合にフォールバック候補リストを返す。
@@ -909,13 +1081,9 @@ class ListendService:
 
         if new_state == ListenState.ON:
             self.session_text_chunks.clear()
-            if old_state != new_state:
-                if self._play_wake_ack():
-                    self.wake_ack_pending = False
-                else:
-                    self.wake_ack_pending = True
-            # ON遷移時の副作用（wake ack再生など）完了後を
-            # 無音タイマーの起点にする。
+            self.wake_ack_pending = False
+            # LLM呼び出しが確定するまで wake ack は再生しない。
+            # 無音タイマーはON遷移時点を起点にする。
             self.last_voice_at = time.monotonic()
 
         if new_state == ListenState.OFF:
@@ -945,15 +1113,14 @@ class ListendService:
         self.session_text_chunks.clear()
         if not text:
             return
-        if self.wake_ack_pending:
-            if self._play_wake_ack():
-                self.wake_ack_pending = False
-            else:
-                logging.warning(
-                    "wake ack was not completed; will retry before next dispatch"
-                )
         logging.info("dispatch session (%s): %s", reason, text)
-        self._dispatch(text)
+        dispatch_text = self._prepare_dispatch_text(text)
+        if dispatch_text is None:
+            logging.info("dispatch completed by SBERT Router without LLM")
+            return
+        if not self._play_wake_ack():
+            logging.warning("wake ack was not completed before dispatch; continuing")
+        self._dispatch(dispatch_text)
         # エージェント発話後のタイムスタンプを更新（ループ防止用）
         self.last_wake_ack_at = time.monotonic()
 
@@ -1198,6 +1365,248 @@ class ListendService:
         normalized = re.sub(r"[\s\u3000]+", "", normalized)
         normalized = re.sub(r"[、。,.!！?？「」『』（）()\[\]{}\"'`]", "", normalized)
         return normalized
+
+    def _prepare_dispatch_text(self, text: str) -> str | None:
+        router = self.intent_router
+        if router is None:
+            return text
+
+        decision = router.route(text)
+        self._log_router_decision(decision)
+        if not decision.has_router_hit:
+            return text
+
+        if decision.dry_run:
+            logging.info("SBERT Router dry-run; dispatching original text")
+            return text
+
+        result = self._execute_router_decision(decision)
+        if result.completed_without_llm:
+            return None
+        return self._build_router_control_prompt(decision, result)
+
+    def _log_router_decision(self, decision: RouterDecision) -> None:
+        high = ", ".join(
+            f"{hit.intent_id}:{hit.score:.3f}" for hit in decision.high_hits
+        ) or "-"
+        middle = ", ".join(
+            f"{hit.intent_id}:{hit.score:.3f}" for hit in decision.middle_hits
+        ) or "-"
+        flags = ", ".join(decision.flags) or "-"
+        logging.info(
+            "SBERT Router decision high=[%s] middle=[%s] flags=[%s] requires_llm=%s dry_run=%s",
+            high,
+            middle,
+            flags,
+            decision.requires_llm,
+            decision.dry_run,
+        )
+        if self._debug_enabled():
+            top = ", ".join(
+                f"{hit.intent_id}:{hit.score:.3f}:{hit.matched_template}"
+                for hit in decision.top_hits
+            ) or "-"
+            logging.debug("SBERT Router top=[%s]", top)
+
+    def _execute_router_decision(
+        self, decision: RouterDecision
+    ) -> RouterExecutionResult:
+        actions: list[ActionResult] = []
+        errors: list[str] = []
+        image_path: str | None = None
+        recall_text: str | None = None
+
+        for index, action in enumerate(decision.flags):
+            result = self._execute_router_action(action, decision)
+            actions.append(result)
+            if not result.ok:
+                errors.append(f"{action}: {result.stderr or result.stdout}")
+                continue
+            if action == "capture_image":
+                image_path = self._extract_capture_path(result.stderr)
+            if action == "recall_memory":
+                recall_text = result.stdout.strip()
+            if action in PTZ_ACTIONS and index < len(decision.flags) - 1:
+                settle_sec = env_float("YATAGARASU_SBERT_MOVE_SETTLE_SEC", 0.5)
+                if settle_sec > 0:
+                    logging.info("SBERT PTZ settle wait %.2fs", settle_sec)
+                    time.sleep(settle_sec)
+
+        completed_without_llm = (
+            bool(actions)
+            and not decision.requires_llm
+            and not errors
+            and image_path is None
+            and recall_text is None
+        )
+        return RouterExecutionResult(
+            completed_without_llm=completed_without_llm,
+            executed_actions=tuple(actions),
+            image_path=image_path,
+            recall_text=recall_text,
+            errors=tuple(errors),
+        )
+
+    def _execute_router_action(
+        self, action: str, decision: RouterDecision
+    ) -> ActionResult:
+        if action in PTZ_ACTIONS:
+            timeout = env_float("YATAGARASU_SBERT_MOVE_TIMEOUT_SEC", 8.0)
+            result = self.ptz_worker.execute(action, timeout)
+            if result.ok:
+                logging.info(
+                    "SBERT action succeeded action=%s elapsed=%.2fs",
+                    action,
+                    result.elapsed_sec,
+                )
+            else:
+                logging.warning(
+                    "SBERT action failed action=%s elapsed=%.2fs stderr=%s",
+                    action,
+                    result.elapsed_sec,
+                    result.stderr,
+                )
+            return result
+
+        specs = self._router_action_specs(decision)
+        spec = specs.get(action)
+        if spec is None:
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr=f"unsupported router action: {action}",
+                elapsed_sec=0.0,
+            )
+
+        argv, timeout = spec
+        started = time.monotonic()
+        env = os.environ.copy()
+        env["YATAGARASU_CWD"] = str(self.settings.workspace_path)
+        try:
+            result = subprocess.run(
+                argv,
+                text=True,
+                env=env,
+                timeout=timeout,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+        except FileNotFoundError as exc:
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr=str(exc),
+                elapsed_sec=time.monotonic() - started,
+            )
+        except subprocess.TimeoutExpired:
+            return ActionResult(
+                action=action,
+                ok=False,
+                stdout="",
+                stderr=f"timed out after {timeout:.1f}s",
+                elapsed_sec=time.monotonic() - started,
+            )
+
+        elapsed = time.monotonic() - started
+        ok = result.returncode == 0
+        if ok:
+            logging.info("SBERT action succeeded action=%s elapsed=%.2fs", action, elapsed)
+        else:
+            logging.warning(
+                "SBERT action failed action=%s rc=%s elapsed=%.2fs stderr=%s",
+                action,
+                result.returncode,
+                elapsed,
+                (result.stderr or "").strip(),
+            )
+        return ActionResult(
+            action=action,
+            ok=ok,
+            stdout=(result.stdout or "").strip(),
+            stderr=(result.stderr or "").strip(),
+            elapsed_sec=elapsed,
+        )
+
+    def _router_action_specs(
+        self, decision: RouterDecision
+    ) -> dict[str, tuple[list[str], float]]:
+        skill_root = self.settings.workspace_path / ".codex" / "skills"
+        move = skill_root / "move-camera" / "scripts" / "ptz_control.sh"
+        capture = skill_root / "view" / "scripts" / "capture"
+        recall = skill_root / "recall" / "scripts" / "recall.sh"
+        move_timeout = env_float("YATAGARASU_SBERT_MOVE_TIMEOUT_SEC", 8.0)
+        view_timeout = env_float("YATAGARASU_SBERT_VIEW_TIMEOUT_SEC", 10.0)
+        recall_timeout = env_float("YATAGARASU_SBERT_RECALL_TIMEOUT_SEC", 8.0)
+        recall_query = self._build_recall_query(decision)
+        return {
+            "move_camera_calibrate": ([str(move), "--calibrate"], move_timeout),
+            "move_camera_left": ([str(move), "--left"], move_timeout),
+            "move_camera_right": ([str(move), "--right"], move_timeout),
+            "move_camera_up": ([str(move), "--up"], move_timeout),
+            "move_camera_down": ([str(move), "--down"], move_timeout),
+            "capture_image": ([str(capture)], view_timeout),
+            "recall_memory": ([str(recall), recall_query], recall_timeout),
+        }
+
+    def _build_recall_query(self, decision: RouterDecision) -> str:
+        text = decision.original_text.strip()
+        if len(text) >= 6:
+            return text
+        recent = " ".join(self.session_text_chunks[-3:]).strip()
+        return recent or text or "最近の会話"
+
+    @staticmethod
+    def _extract_capture_path(stderr: str) -> str | None:
+        match = re.search(r"画像を保存しました:\s*(.+?)\s*\(", stderr)
+        if not match:
+            return None
+        return str(Path(match.group(1).strip()).expanduser().resolve())
+
+    def _build_router_control_prompt(
+        self, decision: RouterDecision, result: RouterExecutionResult
+    ) -> str:
+        executed = "\n".join(
+            f"- {item.action}: {'success' if item.ok else 'failed'}"
+            + (f" ({item.stderr})" if item.stderr and not item.ok else "")
+            for item in result.executed_actions
+        ) or "(なし)"
+        middle = "\n".join(
+            f"- {hit.intent_id}: score={hit.score:.3f}, template={hit.matched_template}"
+            for hit in decision.middle_hits
+        ) or "(なし)"
+        instructions = "\n".join(
+            f"- {instruction}" for instruction in decision.llm_instructions
+        ) or "- 元のユーザー入力に答えてください。"
+        errors = "\n".join(f"- {error}" for error in result.errors) or "(なし)"
+        image_path = result.image_path or "(なし)"
+        recall_text = result.recall_text or "(なし)"
+        return f"""以下は SBERT Skill Router による前処理結果です。
+実行済みの操作を再実行しないでください。
+
+元のユーザー入力:
+{decision.original_text}
+
+実行済み操作:
+{executed}
+
+撮影画像:
+{image_path}
+
+記憶検索結果:
+{recall_text}
+
+Middle判定のIntent候補:
+{middle}
+
+実行時エラー:
+{errors}
+
+追加指示:
+{instructions}
+""".strip()
 
     def _dispatch(self, text: str) -> None:
         argv = shlex.split(self.settings.dispatch_cmd)

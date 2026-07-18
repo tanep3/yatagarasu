@@ -1,6 +1,6 @@
 # Tapo Robot アプリ構成案 v0.2
 
-- 更新日: 2026-02-24
+- 更新日: 2026-07-18
 - 目的: 既存スクリプト資産を活かしつつ、責務分離された構造を維持する
 
 ## 1. 設計方針
@@ -12,6 +12,7 @@
 ## 2. 現状配置（実装準拠）
 
 - `python/listend.py`: 音声取得、VAD、STT、wake/stop状態管理、dispatch
+- `python/intent_router.py`: SBERTによるIntent判定、Router実行計画、LLM向け制御プロンプト材料の生成
 - `bin/yatagarasu`: AIエージェントCLI実行とTTS連携
 - `bin/zunda`: 音声合成
 - `bin/tapovoice`: go2rtc 経由で Tapo へ音声送信（既定 `tapo_tc70_speak`）
@@ -73,10 +74,14 @@ yatagarasu/
 ### 4.2 orchestrator
 
 - trigger入力を受け、記憶参照 -> プロンプト構築 -> AI推論 -> スキル実行を制御する。
+- 現行実装では、`listend.py` がLLM dispatch前にSBERT Skill Routerを呼び、反射的なSkillを先行実行する。
+- Routerで1つ以上のIntentがヒットした場合、元の入力をそのままLLMへ丸投げせず、実行済みSkill結果と追加指示を含む制御プロンプトへ変換する。
 
 ### 4.3 skills
 
 - 外部副作用を持つ操作（発声、PTZ、映像取得、記憶保存）を単機能で提供する。
+- `move-camera` はRouter経由では `ptz_worker` を使い、Tapo接続を常駐化する。
+- `view` は `GO2RTC_FRAME_API_ENABLED=true` の場合、go2rtc HTTP frame APIを優先して画像を取得する。
 
 ### 4.4 infra
 

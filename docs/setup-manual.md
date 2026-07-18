@@ -1,6 +1,6 @@
 # Yatagarasu セットアップマニュアル
 
-- 更新日: 2026-02-25
+- 更新日: 2026-07-18
 - 対象: `yatagarasu` を新規セットアップする開発者
 - 目的: 迷わず再現できるように、前提確認から常駐起動まで手順を一本化する
 
@@ -10,7 +10,9 @@
 
 - user systemd
   - `go2rtc`（カメラ中継）
-  - `listend.py`（常時音声認識）
+  - `listend.py`（常時音声認識 / SBERT Skill Router / AI dispatch）
+- host service
+  - `Ollama`（SemanticMemory要約用）
 - Docker
   - `voicevox_engine`（TTSエンジン）
   - `SemanticMemory`（記憶API、ホストOllamaに接続）
@@ -72,7 +74,7 @@ curl -fsSL https://claude.ai/install.sh | bash
 
 重要:
 
-- `listend.py` から `bin/yatagarasu` を起動する場合、`yatagarasu-listend.service` を動かす **同一ユーザー** で、利用するCLIの導入と認証を済ませてください。
+- `listend.py` から `bin/yatagarasu` を起動する場合、`yatagarasu.service` を動かす **同一ユーザー** で、利用するCLIの導入と認証を済ませてください。
 - `systemd --user` は通常 `.bashrc` を読まないため、CLIがnvmやユーザー固有PATH配下にある場合は unit 側の `Environment=PATH=...` を確認してください。
 
 ## 1.3 実運用設定を守る更新方針
@@ -134,6 +136,19 @@ LISTEND_STOP_WORDS="ストップ"
 LISTEND_STT_BACKEND="faster-whisper"   # or reazonspeech-k2
 ```
 
+SBERT Skill Routerを使う場合は、まずdry-runで判定だけ確認してから実行を有効化します。
+
+```env
+YATAGARASU_SBERT_ROUTER_ENABLED="true"
+YATAGARASU_SBERT_DRY_RUN="true"
+YATAGARASU_SBERT_MODEL="cl-nagoya/ruri-v3-70m"
+YATAGARASU_SBERT_DEVICE="cpu"
+YATAGARASU_SBERT_HIGH_THRESHOLD="0.78"
+YATAGARASU_SBERT_MIDDLE_THRESHOLD="0.68"
+YATAGARASU_SBERT_MOVE_SETTLE_SEC="1.0"
+GO2RTC_FRAME_API_ENABLED="true"
+```
+
 重要:
 
 - 実行時の作業ディレクトリは `workspace` を使う前提です。
@@ -147,11 +162,41 @@ uv venv
 uv sync
 ```
 
+SBERT Skill Router 用の `sentence-transformers` / `transformers` / `sentencepiece` も `uv sync` で導入されます。
+CUDA 依存を避けるため、`torch` / `torchaudio` は `python/pyproject.toml` の `pytorch-cpu` index から導入します。
+
 `ReazonSpeech k2` を使う場合のみ追加インストール:
 
 ```bash
 uv pip install ../external/ReazonSpeech/pkg/k2-asr
 ```
+
+## 4.1 SBERT Skill Router
+
+SBERT Skill Routerは、LLMへ渡す前に「右を向いて」「何が見える？」「前に話したことを思い出して」のような明示Intentを軽く判定します。
+
+初期セットアップでは安全のため、`YATAGARASU_SBERT_ROUTER_ENABLED="false"`、`YATAGARASU_SBERT_DRY_RUN="true"` を推奨します。
+有効化する場合は次の順で進めます。
+
+1. `YATAGARASU_SBERT_ROUTER_ENABLED="true"`、`YATAGARASU_SBERT_DRY_RUN="true"` で起動する。
+2. ログに `SBERT Router ready` と判定結果が出ることを確認する。
+3. 問題なければ `YATAGARASU_SBERT_DRY_RUN="false"` にする。
+4. モデルキャッシュ後、外部通信を避けたい運用では `YATAGARASU_SBERT_OFFLINE="true"` にする。
+
+手動判定テスト:
+
+```bash
+cd /home/<user>/.../yatagarasu
+YATAGARASU_CWD="$(pwd)/workspace" \
+  ./python/.venv/bin/python ./python/intent_router.py "右を向いて何が見える？"
+```
+
+実行対象:
+- `move-camera`: 右/左45度、上/下30度、キャリブレーション。移動だけならLLMを呼ばず、発話もしません。
+- `view`: 撮影画像の絶対パスをLLMプロンプトへ渡します。`GO2RTC_FRAME_API_ENABLED="true"` ならHTTP frame APIを優先します。
+- `recall`: SemanticMemory検索結果をLLMプロンプトへ渡します。
+
+`move-camera` は `ptz_worker` を常駐させ、Tapo接続を使い回します。複数の移動を連続実行する場合は `YATAGARASU_SBERT_MOVE_SETTLE_SEC` 秒だけ待ってから次の動作へ進みます。
 
 ## 5. go2rtc セットアップ（user systemd）
 
@@ -278,11 +323,11 @@ curl -I http://127.0.0.1:8088
 
 ## 7. listend を user systemd で常駐
 
-`~/.config/systemd/user/yatagarasu-listend.service` を作成:
+`~/.config/systemd/user/yatagarasu.service` を作成:
 
 ```ini
 [Unit]
-Description=Yatagarasu listend service
+Description=Yatagarasu voice listener
 After=network.target go2rtc.service
 
 [Service]
@@ -306,10 +351,10 @@ WantedBy=default.target
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now yatagarasu-listend
-systemctl --user status yatagarasu-listend
-systemctl --user show yatagarasu-listend -p Environment -p WorkingDirectory
-journalctl --user -u yatagarasu-listend -f
+systemctl --user enable --now yatagarasu
+systemctl --user status yatagarasu
+systemctl --user show yatagarasu -p Environment -p WorkingDirectory
+journalctl --user -u yatagarasu -f
 ```
 
 ログアウト後も user service を動かす場合:
@@ -373,7 +418,7 @@ YATAGARASU_CWD="$(pwd)/workspace" LISTEND_LOG_LEVEL=DEBUG ./python/.venv/bin/pyt
 - 対策: `tapo_tc70_speak` ストリーム定義、`go2rtc` APIポート（1984）を確認。
 
 6. `dispatch failed` / `dispatch timed out` でAIエージェントCLI関連エラーが出る
-- 対策: `which codex` / `codex --version`、または `which claude` / `claude --version` を、`yatagarasu-listend.service` 実行ユーザーで確認。
+- 対策: `which codex` / `codex --version`、または `which claude` / `claude --version` を、`yatagarasu.service` 実行ユーザーで確認。
 - 対策: 手動で `bin/yatagarasu --engine codex "test"` または `bin/yatagarasu --engine claude "test"` を実行して、CLI認証状態を確認。
 - 対策: `codex: command not found` / `claude: command not found` の場合、unit に `Environment=PATH=/home/<user>/.local/bin:/usr/local/bin:/usr/bin:/bin` を追加し、`daemon-reload` 後に再起動。
 
@@ -381,6 +426,13 @@ YATAGARASU_CWD="$(pwd)/workspace" LISTEND_LOG_LEVEL=DEBUG ./python/.venv/bin/pyt
 - 対策: ホストで `curl -s http://127.0.0.1:11434/api/tags` が成功するか確認。
 - 対策: `ollama pull hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q8_0` でモデルを取得。
 - 対策: `external/SemanticMemory/.env` の `OLLAMA_URL` / `LLM_MODEL` を実環境に合わせる。
+
+8. `右を向いて左を向いて` などの複合移動が詰まる / 速すぎる
+- 対策: `YATAGARASU_SBERT_MOVE_SETTLE_SEC` を調整する。実機では `1.0` 秒を基準にする。
+
+9. `何が見える？` で画像取得に失敗する
+- 対策: `curl -s "http://127.0.0.1:1984/api/streams"` でgo2rtc APIが見えるか確認。
+- 対策: `GO2RTC_FRAME_API_ENABLED="true"` でHTTP frame APIを優先する。失敗時はRTSP取得へフォールバックします。
 
 ## 10. セキュリティ注意
 

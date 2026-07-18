@@ -1,6 +1,6 @@
 # Tapo Robot `listend.py` システム設計 v0.4
 
-- 更新日: 2026-02-24
+- 更新日: 2026-07-18
 - 対象: `python/listend.py`
 - 目的: RTSP 常時リッスンとウェイク制御を、STT切替可能な構造で安定運用する
 
@@ -11,6 +11,7 @@
 - wake を含むセグメントは前置きを捨てず全文採用する。
 - `ON` では文字起こしをセッション蓄積し、無音で1ターン確定して dispatch する。
 - STT バックエンドは `LISTEND_STT_BACKEND` で `faster-whisper` / `reazonspeech-k2` を切替する。
+- SBERT Skill Routerが有効な場合、dispatch前に `move-camera` / `view` / `recall` の明示Intentを判定し、必要なSkillを先行実行する。
 
 ## 2. 構成
 
@@ -38,6 +39,11 @@
 6. `Dispatcher`
 - 確定テキストを `LISTEND_DISPATCH_CMD` に標準入力で渡す。
 
+7. `IntentRouter`
+- `python/intent_router.py` でIntentテンプレートをSBERT埋め込みし、単位ベクトルのコサイン類似度で判定する。
+- 実行対象は `move-camera` / `view` / `recall` に限定する。
+- `move-camera` は `ptz_worker` でTapo接続を使い回す。
+
 ## 3. 状態機械
 
 ### 3.1 状態
@@ -62,10 +68,12 @@
 ## 4. フィードバック音声（現行挙動）
 
 - `OFF -> ON` 遷移時:
-  - `LISTEND_WAKE_ACK_WORD` が設定されていれば `zunda --stdout | tapovoice` で再生する。
-  - 再生失敗時は `wake_ack_pending=True` にし、次回 dispatch 前に再試行する。
+  - `LISTEND_WAKE_ACK_WORD` は再生しない。
 - `ON` 中に再度 wake 検出:
   - 現在は確認音声を抑止している（連続中断回避の一時対応）。
+- LLM dispatch直前:
+  - `LISTEND_WAKE_ACK_WORD` が設定されていれば `zunda --stdout | tapovoice` で再生する。
+  - Router処理が `move-camera` だけで完結する場合は、LLMを呼ばないため発話しない。
 - `ON -> OFF` 遷移時:
   - `LISTEND_STANDBY_WORD`（デフォルト `待機します。`）を再生する。
 
@@ -80,8 +88,9 @@
 5. `ON`:
 - stop hit なら stop語を除去して必要なら最終dispatchし `OFF`
 - stop miss ならセッション追加
-6. `ON` 無音でターン確定時に dispatch
-7. `ON` 無音タイムアウトで `OFF`
+6. `ON` 無音でターン確定時に、必要ならSBERT Skill Routerを実行
+7. LLM応答が必要な場合だけ `LISTEND_WAKE_ACK_WORD` を再生して dispatch
+8. `ON` 無音タイムアウトで `OFF`
 
 ## 6. 設定仕様（`workspace/.env`）
 
@@ -123,6 +132,19 @@
   - `LISTEND_WAKE_ACK_TAPOVOICE_CMD`
 - ログ:
   - `LISTEND_LOG_LEVEL`
+- SBERT Skill Router:
+  - `YATAGARASU_SBERT_ROUTER_ENABLED`
+  - `YATAGARASU_SBERT_DRY_RUN`
+  - `YATAGARASU_SBERT_MODEL`
+  - `YATAGARASU_SBERT_DEVICE`
+  - `YATAGARASU_SBERT_OFFLINE`
+  - `YATAGARASU_SBERT_HIGH_THRESHOLD`
+  - `YATAGARASU_SBERT_MIDDLE_THRESHOLD`
+  - `YATAGARASU_SBERT_TOP_K`
+  - `YATAGARASU_SBERT_MOVE_TIMEOUT_SEC`
+  - `YATAGARASU_SBERT_MOVE_SETTLE_SEC`
+  - `YATAGARASU_SBERT_VIEW_TIMEOUT_SEC`
+  - `YATAGARASU_SBERT_RECALL_TIMEOUT_SEC`
 
 ### 6.3 `.env` で管理しない値（コード定数）
 

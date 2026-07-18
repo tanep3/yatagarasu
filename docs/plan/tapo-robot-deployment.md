@@ -1,6 +1,6 @@
 # Tapo Robot デプロイ方針 v0.2
 
-- 更新日: 2026-02-24
+- 更新日: 2026-07-18
 - 目的: 常駐安定性とハードウェア制御の両立
 
 ## 1. 方針
@@ -26,7 +26,7 @@
 
 ### C. ハイブリッド（採用）
 
-- user systemd: `listend` / `motiond` / orchestrator / wakeup timer / `go2rtc`
+- user systemd: `yatagarasu` (`listend.py`) / `motiond` / orchestrator / wakeup timer / `go2rtc`
 - docker compose: `voicevox_engine` / `SemanticMemory`
 - 理由
   - go2rtc は host 配置の方が音声連携調整が容易
@@ -38,10 +38,11 @@
 
 - `go2rtc.service`
   - `external/go2rtc/go2rtc.yaml` を読み込んで常駐
-- `yatagarasu-listend.service`
+- `yatagarasu.service`
   - RTSP音声取得
   - VAD/ウェイクワード検知
   - ON/OFF状態遷移
+  - SBERT Skill Router
 - `yatagarasu-motiond.service`
   - 動体検知トリガ受信
 - `yatagarasu-orchestrator@.service`
@@ -75,7 +76,7 @@
 
 1. `go2rtc` 起動（user systemd）
 2. Docker サービス起動（VoiceVox / SemanticMemory）
-3. `yatagarasu-listend` と `motiond` 起動
+3. `yatagarasu` と `motiond` 起動
 4. `wakeup.timer` 起動
 5. trigger 受信ごとに `orchestrator@` 実行
 

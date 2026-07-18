@@ -106,6 +106,7 @@ SKILL_PATH/scripts/ptz_control.sh --capability
 - 環境変数は `<workspace>/.env` ファイルで一元管理することを推奨します
 - Pytapoはpythonディレクトリでuvを使ってインストールする必要があります
 - スクリプト実行時は `ptz_control.sh` ラッパー経由で実行することを推奨します
+- `listend.py` の SBERT Router 経由では `ptz_worker` が常駐し、Tapo接続を使い回します
 - カメラの認証情報はTapoアプリの「詳細設定」→「カメラアカウント」で作成してください
 - キャリブレーションはカメラの位置がずれている場合や、正確な位置を把握したい場合に実行してください
 

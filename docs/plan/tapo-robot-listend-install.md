@@ -1,6 +1,6 @@
-# `listend.py` インストール手順 v0.3
+# `listend.py` インストール手順 v0.4
 
-- 更新日: 2026-02-24
+- 更新日: 2026-07-18
 - 対象: `python/listend.py`
 
 ## 1. 前提
@@ -37,6 +37,8 @@ uv sync
 補足:
 - `python/pyproject.toml` は `requires-python >=3.11`。
 - `uv sync` で `faster-whisper` / `silero-vad` / `torch` を導入する。
+- SBERT Skill Router 用の `sentence-transformers` / `transformers` / `sentencepiece` も `uv sync` で導入する。
+- CUDA 依存を避けるため、`torch` / `torchaudio` は `python/pyproject.toml` の `pytorch-cpu` index から導入する。
 
 ### 2.1 ReazonSpeech k2 を使う場合（任意）
 
@@ -92,6 +94,19 @@ LISTEND_WAKE_ACK_TIMEOUT_SEC="5"
 LISTEND_LOG_LEVEL="INFO"
 ```
 
+SBERT Skill Routerを使う場合:
+
+```env
+YATAGARASU_SBERT_ROUTER_ENABLED="true"
+YATAGARASU_SBERT_DRY_RUN="true"
+YATAGARASU_SBERT_MODEL="cl-nagoya/ruri-v3-70m"
+YATAGARASU_SBERT_DEVICE="cpu"
+YATAGARASU_SBERT_HIGH_THRESHOLD="0.78"
+YATAGARASU_SBERT_MIDDLE_THRESHOLD="0.68"
+YATAGARASU_SBERT_MOVE_SETTLE_SEC="1.0"
+GO2RTC_FRAME_API_ENABLED="true"
+```
+
 英語運用の切替:
 - ReazonSpeech k2: `LISTEND_REAZON_LANGUAGE="ja-en"`
 - faster-whisper: `LISTEND_WHISPER_LANGUAGE="en"`（または `auto`）
@@ -113,12 +128,14 @@ YATAGARASU_CWD="/path/to/yatagarasu/workspace" \
 2. 発話後、無音3秒で dispatch される
 3. stopワードで `ON -> OFF` に遷移する
 4. 起動ログに `stt_backend=...` が期待値で表示される
-5. `LISTEND_LOG_LEVEL=DEBUG` 時、`[listend chunk#....]` と `[listend match#....]` が表示される
+5. Router有効時、起動ログに `SBERT Router ready` が表示される
+6. `LISTEND_LOG_LEVEL=DEBUG` 時、`[listend chunk#....]` と `[listend match#....]` が表示される
 
 補足:
 - `dispatch timed out` が出る場合は `LISTEND_DISPATCH_TIMEOUT_SEC` を増やす（例: 180）。
-- 現在実装では `ON` 中の再wake時 ack は抑止（`OFF -> ON` 時のみ ack）。
+- `LISTEND_WAKE_ACK_WORD` はLLM dispatch直前にだけ再生する。Routerが `move-camera` だけで完結する場合は発話しない。
 - OFF遷移時は `LISTEND_STANDBY_WORD` を発声する（空文字で無効）。
+- Router有効時の `move-camera` は `ptz_worker` を使う。複数移動の間隔は `YATAGARASU_SBERT_MOVE_SETTLE_SEC` で調整する。
 
 `461 Unsupported transport` が出る場合:
 - `LISTEND_RTSP_TRANSPORT="auto"` か `udp` で再試行する。
@@ -130,11 +147,11 @@ YATAGARASU_CWD="/path/to/yatagarasu/workspace" \
 
 ## 5. user systemd 登録
 
-`~/.config/systemd/user/yatagarasu-listend.service` を作成:
+`~/.config/systemd/user/yatagarasu.service` を作成:
 
 ```ini
 [Unit]
-Description=Yatagarasu listend service
+Description=Yatagarasu voice listener
 After=network.target
 
 [Service]
@@ -158,14 +175,14 @@ WantedBy=default.target
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable yatagarasu-listend
-systemctl --user start yatagarasu-listend
-systemctl --user status yatagarasu-listend
-systemctl --user show yatagarasu-listend -p Environment -p WorkingDirectory
+systemctl --user enable yatagarasu
+systemctl --user start yatagarasu
+systemctl --user status yatagarasu
+systemctl --user show yatagarasu -p Environment -p WorkingDirectory
 ```
 
 ログ確認:
 
 ```bash
-journalctl --user -u yatagarasu-listend -f
+journalctl --user -u yatagarasu -f
 ```

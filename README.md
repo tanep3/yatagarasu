@@ -1,7 +1,7 @@
 # Yatagarasu
 
 Tapo見守りカメラ（TC70/C200/C220等）をロボット化するためのローカル実行プロジェクトです。  
-音声認識（`listend.py`）・発話（`zunda` + `tapovoice`）・カメラ連携（go2rtc）・記憶（SemanticMemory）を組み合わせて動作します。
+音声認識（`listend.py`）・発話（`zunda` + `tapovoice`）・カメラ連携（go2rtc）・記憶（SemanticMemory）・SBERTによる軽量Intent判定を組み合わせて動作します。
 
 ## Demo
 ![Tapo Camera](./IMG_TapoCamera.jpg)   
@@ -23,13 +23,36 @@ Tapo見守りカメラ（TC70/C200/C220等）をロボット化するための�
 
 - user systemd
   - `go2rtc`（カメラ中継）
-  - `listend.py`（常時リッスン / wake-stop / dispatch）
+  - `listend.py`（常時リッスン / wake-stop / SBERT Skill Router / dispatch）
 - host service
   - `Ollama`（SemanticMemory要約用）
 - Docker
   - `voicevox_engine`
   - `SemanticMemory`
   - `searxng`（`tanechan-search` 用）
+
+## SBERT Skill Router
+
+`YATAGARASU_SBERT_ROUTER_ENABLED="true"` の場合、`listend.py` はLLMへ渡す前に短いIntent判定を行います。
+対象は、反射的に実行したい `move-camera`、撮影してLLMへ渡す `view`、明示的な過去記憶検索の `recall` です。
+
+- `move-camera`: 右/左は45度、上/下は30度、キャリブレーションに対応。移動だけで完結する場合はLLMを呼ばず、発話もしません。
+- `view`: go2rtcのHTTP frame APIを優先して画像を取得し、撮影画像の絶対パスをLLMプロンプトへ渡します。
+- `recall`: SemanticMemoryから思い出した内容をLLMプロンプトへ追加します。
+- `search` / `fetch` / `memorize` / `skill-creator`: 従来どおりAIエージェント側のSkillに任せます。
+
+主な設定:
+
+```bash
+YATAGARASU_SBERT_ROUTER_ENABLED="false"
+YATAGARASU_SBERT_DRY_RUN="true"
+YATAGARASU_SBERT_MODEL="cl-nagoya/ruri-v3-70m"
+YATAGARASU_SBERT_DEVICE="cpu"
+YATAGARASU_SBERT_MOVE_SETTLE_SEC="1.0"
+GO2RTC_FRAME_API_ENABLED="true"
+```
+
+初回はモデル取得が必要です。運用で安定した後は `YATAGARASU_SBERT_OFFLINE="true"` にすると、キャッシュ済みモデルだけを使います。
 
 ## LLM実行基盤（Codex CLI / Claude Code / opencode）
 
@@ -73,6 +96,7 @@ claude -p "hello" --model haiku
 5. `Ollama`（host）導入・モデル取得
 6. Dockerサービス（`voicevox_engine` / `SemanticMemory` / `searxng`）起動
 7. `listend.py`（user systemd）起動
+8. 必要に応じてSBERT Skill Routerをdry-runから有効化
 
 ## 診断
 
@@ -124,6 +148,9 @@ git pull --ff-only
 | onvif-zeep | ONVIF制御 | MIT | https://github.com/FalkTannhaeuser/python-onvif-zeep |
 | PyTorch | 推論基盤 | BSD-3-Clause | https://pypi.org/project/torch/ |
 | NumPy | 数値計算 | BSD系（PyPI表記参照） | https://pypi.org/project/numpy/ |
+| sentence-transformers | SBERT Skill Router | Apache-2.0 | https://github.com/UKPLab/sentence-transformers |
+| Transformers | SBERT Skill Router | Apache-2.0 | https://github.com/huggingface/transformers |
+| SentencePiece | Ruri v3 tokenizer | Apache-2.0 | https://github.com/google/sentencepiece |
 
 ## 使用モデルとライセンス
 
@@ -132,6 +159,7 @@ git pull --ff-only
 | `Systran/faster-whisper-base` | `LISTEND_STT_BACKEND=faster-whisper` | MIT | https://huggingface.co/Systran/faster-whisper-base |
 | `reazon-research/reazonspeech-k2-v2` | `LISTEND_STT_BACKEND=reazonspeech-k2` | Apache-2.0 | https://huggingface.co/reazon-research/reazonspeech-k2-v2 |
 | `cl-nagoya/ruri-small-v2` | SemanticMemory埋め込み | Apache-2.0 + Gemma Terms（SemanticMemory README記載） | https://huggingface.co/cl-nagoya/ruri-small-v2 |
+| `cl-nagoya/ruri-v3-70m` | SBERT Skill Router | Apache-2.0 | https://huggingface.co/cl-nagoya/ruri-v3-70m |
 | `SakanaAI/TinySwallow-1.5B-Instruct-GGUF` | SemanticMemory要約 | Apache-2.0 + Gemma Terms（SemanticMemory README記載） | https://huggingface.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF |
 
 補足:

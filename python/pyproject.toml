@@ -8,8 +8,12 @@ dependencies = [
     "faster-whisper>=1.1.0",
     "numpy>=2.1.0",
     "onvif-zeep>=0.2.12",
+    "sentence-transformers>=5.0.0",
+    "sentencepiece>=0.2.0",
     "silero-vad>=5.1.2",
     "torch>=2.2.0",
+    "torchaudio>=2.2.0",
+    "transformers>=4.48.0",
 ]
 
 [dependency-groups]
@@ -17,3 +21,12 @@ dev = [
     "pytest>=9.0.2",
     "pytest-cov>=7.0.0",
 ]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+torchaudio = { index = "pytorch-cpu" }

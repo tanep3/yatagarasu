@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+"""Persistent Tapo PTZ worker.
+
+The worker keeps one authenticated Tapo client alive and accepts JSON lines on
+stdin. It is meant to be owned by listend so move-camera commands avoid paying
+Python import and Tapo login costs for every utterance.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import time
+from pathlib import Path
+from typing import Any
+
+
+ACTION_TO_MOVE: dict[str, tuple[int, int] | str] = {
+    "move_camera_left": (-45, 0),
+    "move_camera_right": (45, 0),
+    "move_camera_up": (0, 30),
+    "move_camera_down": (0, -30),
+    "move_camera_calibrate": "calibrate",
+}
+
+
+def load_env_file() -> None:
+    current_dir = Path(__file__).resolve().parent
+    for _ in range(10):
+        env_file = current_dir / ".env"
+        if env_file.exists():
+            for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                os.environ.setdefault(key, value)
+            return
+        if current_dir == current_dir.parent:
+            return
+        current_dir = current_dir.parent
+
+
+def emit(payload: dict[str, Any]) -> None:
+    print(json.dumps(payload, ensure_ascii=False), flush=True)
+
+
+def main() -> int:
+    load_env_file()
+
+    try:
+        from pytapo import Tapo
+    except Exception as exc:
+        emit({"type": "ready", "ok": False, "error": f"pytapo import failed: {exc}"})
+        return 1
+
+    host = os.getenv("TAPO_HOST", "192.168.0.132")
+    user = os.getenv("TAPO_USER", "admin")
+    password = os.getenv("TAPO_PASSWORD", "")
+    if not password:
+        emit({"type": "ready", "ok": False, "error": "TAPO_PASSWORD is empty"})
+        return 1
+
+    try:
+        tapo = Tapo(host, user, password)
+    except Exception as exc:
+        emit({"type": "ready", "ok": False, "error": f"Tapo connect failed: {exc}"})
+        return 1
+
+    emit({"type": "ready", "ok": True})
+
+    for raw_line in sys.stdin:
+        line = raw_line.strip()
+        if not line:
+            continue
+        action = ""
+        started = time.monotonic()
+        try:
+            request = json.loads(line)
+            action = request.get("action", "")
+            if action == "stop":
+                emit({"type": "result", "ok": True, "action": action})
+                return 0
+
+            move = ACTION_TO_MOVE.get(action)
+            if move is None:
+                raise ValueError(f"unsupported action: {action}")
+            if move == "calibrate":
+                result = tapo.calibrateMotor()
+                stdout = "キャリブレーションを開始しました"
+            else:
+                x, y = move
+                result = tapo.moveMotor(x, y)
+                stdout = f"移動しました: x={x}, y={y}"
+
+            emit(
+                {
+                    "type": "result",
+                    "ok": True,
+                    "action": action,
+                    "stdout": stdout,
+                    "result": result,
+                    "elapsed_sec": round(time.monotonic() - started, 6),
+                }
+            )
+        except Exception as exc:
+            emit(
+                {
+                    "type": "result",
+                    "ok": False,
+                    "action": action,
+                    "stderr": str(exc),
+                    "elapsed_sec": round(time.monotonic() - started, 6),
+                }
+            )
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

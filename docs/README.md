@@ -16,9 +16,11 @@
 1. `docs/setup-manual.md`
 2. `docs/plan/tapo-robot-requirements.md`
 3. `docs/plan/tapo-robot-thinking-order.md`
-4. `docs/plan/tapo-robot-listend-system-design.md`
-5. `docs/plan/tapo-robot-listend-install.md`
-6. `docs/plan/tapo-robot-architecture.md`
-7. `docs/plan/tapo-robot-deployment.md`
-8. `docs/tasks/tapo-robot-backlog.md`
-9. `docs/considerations/open-issues.md`
+4. `docs/plan/sbert-skill-router-spec.md`
+5. `docs/plan/sbert-skill-router-system-design.md`
+6. `docs/plan/tapo-robot-listend-system-design.md`
+7. `docs/plan/tapo-robot-listend-install.md`
+8. `docs/plan/tapo-robot-architecture.md`
+9. `docs/plan/tapo-robot-deployment.md`
+10. `docs/tasks/tapo-robot-backlog.md`
+11. `docs/considerations/open-issues.md`

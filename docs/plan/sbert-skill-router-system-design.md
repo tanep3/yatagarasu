@@ -89,7 +89,7 @@ SemanticMemory は既存どおり `cl-nagoya/ruri-small-v2` のまま維持し�
 SBERT Skill Router は `listend.py` に組み込む。
 `listend.py` は起動時に `YATAGARASU_CWD/.env` を読み込むため、Intent テンプレートも同じ `.env` から読み込む。
 
-`.env` を変更した場合は `yatagarasu-listend.service` を再起動し、起動時にテンプレートを再ロードする。
+`.env` を変更した場合は `yatagarasu.service` を再起動し、起動時にテンプレートを再ロードする。
 
 ### ChromaDB を使うか
 
@@ -153,7 +153,7 @@ Intent テンプレートの埋め込み数が少なければ、テンプレー�
 ```text
 workspace/.env の Intent テンプレートを編集
   ↓
-systemctl --user restart yatagarasu-listend
+systemctl --user restart yatagarasu
   ↓
 listend 起動時にテンプレートを再読み込み
   ↓
@@ -543,18 +543,20 @@ recall_memory
 YATAGARASU_SBERT_ROUTER_ENABLED="false"
 YATAGARASU_SBERT_MODEL="cl-nagoya/ruri-v3-70m"
 YATAGARASU_SBERT_DEVICE="cpu"
+YATAGARASU_SBERT_OFFLINE="false"
 YATAGARASU_SBERT_HIGH_THRESHOLD="0.78"
 YATAGARASU_SBERT_MIDDLE_THRESHOLD="0.68"
 YATAGARASU_SBERT_TOP_K="5"
-YATAGARASU_SBERT_LOG_LEVEL="INFO"
 YATAGARASU_SBERT_DRY_RUN="true"
 YATAGARASU_SBERT_MOVE_TIMEOUT_SEC="8"
+YATAGARASU_SBERT_MOVE_SETTLE_SEC="1.0"
 YATAGARASU_SBERT_VIEW_TIMEOUT_SEC="10"
 YATAGARASU_SBERT_RECALL_TIMEOUT_SEC="8"
 ```
 
 `YATAGARASU_SBERT_DEVICE` は初期値 `cpu` 固定。
 GPU は初期実装では対象外。
+`YATAGARASU_SBERT_OFFLINE=true` の場合は、キャッシュ済みモデルだけを使い、Hugging Face への確認通信を行わない。
 `YATAGARASU_SBERT_DRY_RUN` は Router 判定ログだけを出し、Skill 実行とプロンプト変換を行わない検証用フラグである。
 
 Intent テンプレートは `|` 区切り。
@@ -601,16 +603,21 @@ dispatch前:
 1. 入力テキストを normalize せず、そのまま SBERT encode する
 2. 入力 embedding とテンプレート embedding を単位ベクトルに normalize する
 3. normalize 済み embedding 同士の dot product を取り、cosine similarity として扱う
-4. Intent ごとに最高スコアのテンプレートを採用する
-5. `score >= high_threshold` を High とする
-6. `middle_threshold <= score < high_threshold` を Middle とする
-7. High hit から flags を構築する
-8. Middle hit は LLM 候補として保持する
-9. `requires_llm` を決定する
+4. 判定補助用にだけ、入力テキストを NFKC・小文字化・カタカナひらがな寄せ・句読点除去で軽く正規化する
+5. Intent ごとの `gate_terms` が入力に含まれない場合、その Intent は候補から除外する
+6. Intent ごとに最高スコアのテンプレートを採用する
+7. `score >= high_threshold` を High とする
+8. `middle_threshold <= score < high_threshold` を Middle とする
+9. High hit をカテゴリごとの採用規則で整理する
+10. High hit から flags を構築する
+11. Middle hit は LLM 候補として保持する
+12. `requires_llm` を決定する
 
 注意:
 
 - SBERT では表記ゆれを吸収したいため、原則として入力テキストの強い正規化はしない
+- `gate_terms` は SBERT を置き換えるルールベース処理ではなく、「右」と「左」のような対義方向や、汎用的な近傍語による誤爆を抑える軽い安全弁として扱う
+- 複合 Intent は `gate_required_groups` で「要約系 + 翻訳系」「転記系 + 翻訳系」のようなAND条件を持てる。これにより、単なる「翻訳して」が `文字起こしして和訳して` に誤分類されるのを防ぐ
 - Ruri v3 の prefix は Intent 判定では付けない。これは検索クエリ/検索文書ではなく、短文同士の意味類似度判定として扱うため
 - Score は cosine similarity に統一する。ベクトル距離は閾値調整が直感的でないため初期実装では使わない
 - `SentenceTransformer.encode(..., normalize_embeddings=True)` を使い、テンプレート・入力の両方を normalize する
@@ -632,7 +639,14 @@ view_scene + view_document_read -> capture_image は1回
 recall_topic + recall_compare -> recall_memory は1回
 ```
 
-実行順は `listend.py` 側で固定する。
+High hit の採用規則:
+
+- `move` は複数採用する。`右を向いて左を向いて` のような首振り動作を許可する
+- 複数の `move` は、固定順ではなく入力テキストに現れた順序で実行する
+- `view` は原則1件に絞る。`view_document_summarize_translate` などの複合 Intent があれば、それを優先する
+- `recall` は原則最高スコア1件に絞る
+
+実行順は `intent_router.py` の `ACTION_ORDER` で固定し、`listend.py` はその順序で実行する。
 
 ```python
 ACTION_ORDER = (
@@ -652,7 +666,6 @@ ACTION_ORDER = (
 
 ```text
 session_text_chunks を結合
-wake ack pending を処理
 logging.info("dispatch session ...")
 self._dispatch(text)
 last_wake_ack_at 更新
@@ -664,7 +677,6 @@ Router は `_dispatch(text)` の直前に挟む。
 
 ```text
 session_text_chunks を結合
-wake ack pending を処理
 logging.info("dispatch session ...")
 
 if router enabled:
@@ -678,8 +690,8 @@ if router enabled:
         if result.completed_without_llm:
             return
         text = build_control_prompt(text, decision, result)
-        play "考えるね"
 
+play "考えるね"
 self._dispatch(text)
 last_wake_ack_at 更新
 ```
@@ -721,21 +733,35 @@ class ActionResult:
 
 | Action | Command |
 | --- | --- |
-| `move_camera_left` | `<workspace>/.codex/skills/move-camera/scripts/ptz_control.sh --left` |
-| `move_camera_right` | `<workspace>/.codex/skills/move-camera/scripts/ptz_control.sh --right` |
-| `move_camera_up` | `<workspace>/.codex/skills/move-camera/scripts/ptz_control.sh --up` |
-| `move_camera_down` | `<workspace>/.codex/skills/move-camera/scripts/ptz_control.sh --down` |
-| `move_camera_calibrate` | `<workspace>/.codex/skills/move-camera/scripts/ptz_control.sh --calibrate` |
+| `move_camera_left` | `PTZ worker -> moveMotor(-45, 0)` |
+| `move_camera_right` | `PTZ worker -> moveMotor(45, 0)` |
+| `move_camera_up` | `PTZ worker -> moveMotor(0, 30)` |
+| `move_camera_down` | `PTZ worker -> moveMotor(0, -30)` |
+| `move_camera_calibrate` | `PTZ worker -> calibrateMotor()` |
 | `capture_image` | `<workspace>/.codex/skills/view/scripts/capture` |
 | `recall_memory` | `<workspace>/.codex/skills/recall/scripts/recall.sh "<query>"` |
+
+Router 経由の `move-camera` は `ptz_worker` を優先する。
+`ptz_worker` はスキル配下 `.venv` の Python で常駐し、`pytapo` import と Tapo 接続/認証を初回だけ行う。
+これにより、音声指示ごとに Python 起動・import・ログインを繰り返さず、move 実行を `moveMotor()` 本体の時間に近づける。
+
+通常の Skill / CLI 経由では従来どおり `ptz_control.sh` も使える。
+`ptz_control.sh` はスキル配下に `.venv` があればそれを優先し、専用 `.venv` がない開発環境では `uv run` へフォールバックする。
+
+`capture_image` は `GO2RTC_FRAME_API_ENABLED=true` の場合、go2rtc の HTTP frame API (`/api/frame.jpeg?src=<stream>`) を優先する。
+取得したJPEGを ffmpeg で指定サイズへリサイズし、失敗時のみ従来の RTSP 1フレーム取得へフォールバックする。
 
 実行タイムアウト:
 
 ```bash
 YATAGARASU_SBERT_MOVE_TIMEOUT_SEC="8"
+YATAGARASU_SBERT_MOVE_SETTLE_SEC="1.0"
 YATAGARASU_SBERT_VIEW_TIMEOUT_SEC="10"
 YATAGARASU_SBERT_RECALL_TIMEOUT_SEC="8"
 ```
+
+`YATAGARASU_SBERT_MOVE_SETTLE_SEC` は、PTZ 移動の後にまだ次の Router action がある場合だけ挿入する待機秒数である。
+Tapo API は `moveMotor()` の応答が返っても物理モーターの移動完了を厳密には通知しないため、複合 move や move→view の安定化に使う。
 
 ### 4.10 LLM 要否判定
 
@@ -761,8 +787,8 @@ LLM を呼ぶ条件:
 
 LLM を呼ぶことが確定した後、`_dispatch(text)` の前に既存の `LISTEND_WAKE_ACK_WORD` を再生する。
 
-現在の `listend.py` は ON 遷移時に `LISTEND_WAKE_ACK_WORD` を再生している。
-この再生タイミングを、Router 有効/無効にかかわらず LLM dispatch 直前へ移す。
+改訂前の `listend.py` は ON 遷移時に `LISTEND_WAKE_ACK_WORD` を再生していた。
+現行実装では、Router 有効/無効にかかわらず LLM dispatch 直前へ移している。
 
 変更後の方針:
 

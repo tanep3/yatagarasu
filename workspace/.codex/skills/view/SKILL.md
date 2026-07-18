@@ -76,7 +76,9 @@ STREAM=tapo_tc70 WIDTH=1280 HEIGHT=720 SKILL_PATH/scripts/capture -o hd.jpg
 | 変数 | 説明 | デフォルト |
 |------|------|----------|
 | `GO2RTC_HOST` | go2rtcホスト | localhost |
+| `GO2RTC_API_PORT` | go2rtc APIポート | 1984 |
 | `GO2RTC_RTSP_PORT` | RTSPポート | 8554 |
+| `GO2RTC_FRAME_API_ENABLED` | trueならHTTP frame APIを優先 | true |
 | `STREAM` | ストリーム名 | tapo_tc70 |
 | `WIDTH` | 出力幅 | 640 |
 | `HEIGHT` | 出力高さ | 480 |

@@ -26,7 +26,9 @@ load_env_file() {
             [[ "${key}" =~ ^#.*$ ]] && continue
             [[ -z "${key}" ]] && continue
             value=$(echo "${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
-            [[ -z "${!key}" ]] && export "${key}=${value}"
+            if [[ -z "${!key:-}" ]]; then
+                export "${key}=${value}"
+            fi
         done < "${env_file}"
     fi
 }
@@ -55,9 +57,9 @@ show_help() {
     SEMANTIC_MEMORY_RECALL_THRESHOLD       デフォルト類似度閾値
 
 例:
-    $(basename "$0\") "猫について"
-    $(basename "$0\") "WiFi" --limit 5
-    $(basename "$0\") "プロジェクト" --threshold 0.6
+    $(basename "$0") "猫について"
+    $(basename "$0") "WiFi" --limit 5
+    $(basename "$0") "プロジェクト" --threshold 0.6
 EOF
 }
 

@@ -14,6 +14,11 @@
 - カメラスキルの保存先とPython起動を、リポジトリ固有の絶対パスに依存しない形へ整理
 - `workspace/.env` は運用固有設定としてGit管理しない方針をドキュメントに明記
 - `bin/yatagarasu-doctor` を追加し、`bin/yatagarasu doctor` から実行環境を診断できるようになった
+- `listend.py` にSBERT Skill Routerを追加し、`move-camera` / `view` / `recall` をLLM dispatch前に実行できるようになった
+- `move-camera` は `ptz_worker` でTapo接続を常駐化し、連続移動時は `YATAGARASU_SBERT_MOVE_SETTLE_SEC` で待機時間を調整できるようになった
+- `view` は `GO2RTC_FRAME_API_ENABLED=true` の場合にgo2rtc HTTP frame APIを優先し、画像取得を高速化した
+- `LISTEND_WAKE_ACK_WORD` の再生タイミングをLLM dispatch直前へ移動し、移動だけで完結するRouter処理では発話しないようにした
+- 画像翻訳Intentでは、翻訳だけを返すようLLM向けプロンプトを調整した
 
 ## V1.1.0 (2026-02-28)
 

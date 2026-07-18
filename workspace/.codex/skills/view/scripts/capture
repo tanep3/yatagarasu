@@ -8,6 +8,7 @@
 #   capture -s tapo_tc70       # ストリーム名指定
 
 set -e
+set -o pipefail
 
 # .envファイルから環境変数を読み込む
 load_env_file() {
@@ -37,7 +38,9 @@ load_env_file() {
             # 値から引用符を削除
             value=$(echo "${value}" | sed 's/^[[:space:]]*"//;s/"[[:space:]]*$//;s/^[[:space:]]*'"'"'//;s/[[:space:]]*'"'"'$//')
             # 既存の環境変数を上書きしない
-            [[ -z "${!key}" ]] && export "${key}=${value}"
+            if [[ -z "${!key:-}" ]]; then
+                export "${key}=${value}"
+            fi
         done < "${env_file}"
     fi
 }
@@ -48,6 +51,7 @@ load_env_file
 GO2RTC_HOST="${GO2RTC_HOST:-localhost}"
 GO2RTC_API_PORT="${GO2RTC_API_PORT:-1984}"
 GO2RTC_RTSP_PORT="${GO2RTC_RTSP_PORT:-8554}"
+GO2RTC_FRAME_API_ENABLED="${GO2RTC_FRAME_API_ENABLED:-true}"
 STREAM="${STREAM:-tapo_tc70}"
 WIDTH="${WIDTH:-640}"
 HEIGHT="${HEIGHT:-480}"
@@ -70,11 +74,14 @@ show_help() {
     -o, --output FILE     出力ファイル (デフォルト: 標準出力)
     --host HOST           go2rtcホスト (デフォルト: localhost)
     --rtsp-port PORT      RTSPポート (デフォルト: 8554)
+    --api-port PORT       go2rtc APIポート (デフォルト: 1984)
     -h, --help            このヘルプを表示
 
 環境変数:
     GO2RTC_HOST           go2rtcホスト
     GO2RTC_RTSP_PORT      RTSPポート
+    GO2RTC_API_PORT       APIポート
+    GO2RTC_FRAME_API_ENABLED  trueならHTTP frame APIを優先
     STREAM                ストリーム名
     WIDTH                 出力幅
     HEIGHT                出力高さ
@@ -120,6 +127,10 @@ while [[ $# -gt 0 ]]; do
             GO2RTC_RTSP_PORT="$2"
             shift 2
             ;;
+        --api-port)
+            GO2RTC_API_PORT="$2"
+            shift 2
+            ;;
         -h|--help)
             show_help
             exit 0
@@ -134,16 +145,32 @@ done
 
 # 一時ファイル
 TEMP_FILE=$(mktemp --suffix=.jpg)
-trap "rm -f ${TEMP_FILE}" EXIT
+FRAME_FILE=$(mktemp --suffix=.jpg)
+trap "rm -f ${TEMP_FILE} ${FRAME_FILE}" EXIT
 
-# go2rtcのRTSP URL
+# go2rtcのURL
+FRAME_URL="http://${GO2RTC_HOST}:${GO2RTC_API_PORT}/api/frame.jpeg?src=${STREAM}"
 RTSP_URL="rtsp://${GO2RTC_HOST}:${GO2RTC_RTSP_PORT}/${STREAM}?video&audio"
 
-# ffmpegでストリームから1フレーム取得
-if ! ffmpeg -loglevel error -rtsp_transport tcp -t 1 -i "${RTSP_URL}" -frames:v 1 -q:v "${QUALITY}" -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2" -update 1 -y "${TEMP_FILE}" 2>/dev/null; then
-    echo "エラー: go2rtcから画像を取得できませんでした: ${RTSP_URL}" >&2
-    echo "ヒント: go2rtcが起動しているか、ストリーム名が正しいか確認してください" >&2
-    exit 1
+# go2rtc HTTP frame APIを優先する。失敗時は従来のRTSP取得へフォールバック。
+if [[ "${GO2RTC_FRAME_API_ENABLED,,}" == "true" || "${GO2RTC_FRAME_API_ENABLED}" == "1" ]]; then
+    if curl -fsS --max-time 5 "${FRAME_URL}" -o "${FRAME_FILE}" \
+        && ffmpeg -loglevel error -i "${FRAME_FILE}" -frames:v 1 -q:v "${QUALITY}" -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2" -update 1 -y "${TEMP_FILE}" 2>/dev/null; then
+        :
+    else
+        echo "警告: go2rtc frame APIから画像を取得できませんでした。RTSPへフォールバックします: ${FRAME_URL}" >&2
+        if ! ffmpeg -loglevel error -rtsp_transport tcp -t 1 -i "${RTSP_URL}" -frames:v 1 -q:v "${QUALITY}" -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2" -update 1 -y "${TEMP_FILE}" 2>/dev/null; then
+            echo "エラー: go2rtcから画像を取得できませんでした: ${RTSP_URL}" >&2
+            echo "ヒント: go2rtcが起動しているか、ストリーム名が正しいか確認してください" >&2
+            exit 1
+        fi
+    fi
+else
+    if ! ffmpeg -loglevel error -rtsp_transport tcp -t 1 -i "${RTSP_URL}" -frames:v 1 -q:v "${QUALITY}" -vf "scale=${WIDTH}:${HEIGHT}:force_original_aspect_ratio=decrease,pad=${WIDTH}:${HEIGHT}:(ow-iw)/2:(oh-ih)/2" -update 1 -y "${TEMP_FILE}" 2>/dev/null; then
+        echo "エラー: go2rtcから画像を取得できませんでした: ${RTSP_URL}" >&2
+        echo "ヒント: go2rtcが起動しているか、ストリーム名が正しいか確認してください" >&2
+        exit 1
+    fi
 fi
 
 # 出力
