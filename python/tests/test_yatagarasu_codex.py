@@ -134,18 +134,33 @@ def test_memorize_scripts_surface_http_failures(tmp_path: Path) -> None:
         fake_path / "curl",
         "#!/bin/bash\nprintf '{\"detail\":\"upstream failed\"}'\nexit 22\n",
     )
-    scripts = [
+    source_script = (
         PROJECT_ROOT
         / "workspace"
         / ".codex"
         / "skills"
         / "memorize"
         / "scripts"
-        / "memorize.sh",
-        PROJECT_ROOT / "bin" / "memorize.sh",
-    ]
+        / "memorize.sh"
+    )
+    test_workspace = tmp_path / "workspace"
+    test_script = (
+        test_workspace
+        / ".codex"
+        / "skills"
+        / "memorize"
+        / "scripts"
+        / "memorize.sh"
+    )
+    test_script.parent.mkdir(parents=True)
+    shutil.copy2(source_script, test_script)
+    (test_workspace / ".env").write_text(
+        "SEMANTIC_MEMORY_API_URL=http://from-file.invalid/api\n"
+    )
+    scripts = [test_script, PROJECT_ROOT / "bin" / "memorize.sh"]
     env = os.environ.copy()
     env["PATH"] = f"{fake_path}:{env['PATH']}"
+    env["SEMANTIC_MEMORY_API_URL"] = "http://already-set.invalid/api"
 
     for script in scripts:
         subprocess.run(["bash", "-n", str(script)], check=True)

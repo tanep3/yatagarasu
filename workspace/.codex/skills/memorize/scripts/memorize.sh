@@ -26,7 +26,9 @@ load_env_file() {
             [[ "${key}" =~ ^#.*$ ]] && continue
             [[ -z "${key}" ]] && continue
             value=$(echo "${value}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/^"//;s/"$//;s/^'"'"'//;s/'"'"'$//')
-            [[ -z "${!key}" ]] && export "${key}=${value}"
+            if [[ -z "${!key:-}" ]]; then
+                export "${key}=${value}"
+            fi
         done < "${env_file}"
     fi
 }
