@@ -120,6 +120,33 @@ EOF
 )
 fi
 
+# 同一の副作用要求を短時間に再実行しても、最初の保存IDへ収束させる。
+DEDUP_WINDOW_SEC="${YATAGARASU_MEMORIZE_DEDUP_WINDOW_SEC:-60}"
+if [[ ! "$DEDUP_WINDOW_SEC" =~ ^[0-9]+$ ]]; then
+    echo "エラー: YATAGARASU_MEMORIZE_DEDUP_WINDOW_SEC must be a non-negative integer" >&2
+    exit 1
+fi
+STATE_ROOT="${YATAGARASU_MEMORIZE_STATE_DIR:-${TMPDIR:-/tmp}/yatagarasu-memorize}"
+umask 077
+mkdir -p "$STATE_ROOT"
+REQUEST_KEY=$(printf '%s\0%s' "$API_URL" "$JSON" | sha256sum | awk '{print $1}')
+LOCK_FILE="$STATE_ROOT/${REQUEST_KEY}.lock"
+CACHE_FILE="$STATE_ROOT/${REQUEST_KEY}.saved"
+exec 9>"$LOCK_FILE"
+flock 9
+
+NOW=$(date +%s)
+if [[ -f "$CACHE_FILE" ]]; then
+    read -r SAVED_AT CACHED_ID < "$CACHE_FILE" || true
+    if [[ "$SAVED_AT" =~ ^[0-9]+$ && "$CACHED_ID" =~ ^[0-9]+$ ]] \
+        && (( NOW >= SAVED_AT && NOW - SAVED_AT <= DEDUP_WINDOW_SEC )); then
+        RESPONSE=$(printf '{"id":%s,"status":"saved"}' "$CACHED_ID")
+        echo "記憶は既に保存済みです (ID: $CACHED_ID)" >&2
+        echo "$RESPONSE"
+        exit 0
+    fi
+fi
+
 # APIリクエスト
 if ! RESPONSE=$(curl --silent --show-error --fail-with-body \
     --max-time "${SEMANTIC_MEMORY_TIMEOUT_SEC:-30}" \
@@ -133,6 +160,13 @@ fi
 # エラーチェック
 if echo "$RESPONSE" | jq -e '.status == "saved"' >/dev/null 2>&1; then
     ID=$(echo "$RESPONSE" | jq -r '.id')
+    if [[ ! "$ID" =~ ^[0-9]+$ ]]; then
+        echo "エラー: SemanticMemory API returned an invalid saved ID" >&2
+        exit 1
+    fi
+    CACHE_TMP=$(mktemp "${CACHE_FILE}.XXXXXX")
+    printf '%s %s\n' "$NOW" "$ID" > "$CACHE_TMP"
+    mv "$CACHE_TMP" "$CACHE_FILE"
     echo "記憶を保存しました (ID: $ID)" >&2
     echo "$RESPONSE"
 elif echo "$RESPONSE" | jq -e '.error' >/dev/null 2>&1; then

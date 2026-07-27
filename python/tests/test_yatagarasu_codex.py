@@ -161,6 +161,7 @@ def test_memorize_scripts_surface_http_failures(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["PATH"] = f"{fake_path}:{env['PATH']}"
     env["SEMANTIC_MEMORY_API_URL"] = "http://already-set.invalid/api"
+    env["YATAGARASU_MEMORIZE_STATE_DIR"] = str(tmp_path / "memorize-state")
 
     for script in scripts:
         subprocess.run(["bash", "-n", str(script)], check=True)
@@ -175,6 +176,54 @@ def test_memorize_scripts_surface_http_failures(tmp_path: Path) -> None:
         assert result.returncode == 1, script
         assert "SemanticMemory API request failed" in result.stderr, script
         assert "upstream failed" not in result.stdout, script
+
+
+def test_memorize_script_deduplicates_concurrent_identical_requests(
+    tmp_path: Path,
+) -> None:
+    fake_path = tmp_path / "fake-path"
+    runtime_dir = tmp_path / "runtime"
+    fake_path.mkdir()
+    runtime_dir.mkdir()
+    count_file = tmp_path / "curl-count"
+    write_executable(
+        fake_path / "curl",
+        "#!/bin/bash\nprintf 'call\\n' >> \"$CURL_COUNT_FILE\"\nsleep 0.2\nprintf '{\"id\":42,\"status\":\"saved\"}'\n",
+    )
+    script = (
+        PROJECT_ROOT
+        / "workspace"
+        / ".codex"
+        / "skills"
+        / "memorize"
+        / "scripts"
+        / "memorize.sh"
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_path}:{env['PATH']}",
+            "CURL_COUNT_FILE": str(count_file),
+            "YATAGARASU_MEMORIZE_STATE_DIR": str(runtime_dir),
+        }
+    )
+
+    processes = [
+        subprocess.Popen(
+            [str(script), "same side effect"],
+            cwd=PROJECT_ROOT / "workspace",
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    results = [process.communicate(timeout=5) for process in processes]
+
+    assert [process.returncode for process in processes] == [0, 0]
+    assert count_file.read_text().splitlines() == ["call"]
+    assert all('"id":42' in stdout for stdout, _ in results)
 
 
 def test_agent_instructions_name_executable_search_and_fetch_entries() -> None:
