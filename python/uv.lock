@@ -505,6 +505,19 @@ wheels = [
 ]
 
 [[package]]
+name = "livekit-wakeword"
+version = "0.2.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "onnxruntime" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/34/29/30cadc7d03635f76dfe7aeb0359cd0e2fdccaf08ed101936dac0c26dc6f7/livekit_wakeword-0.2.1.tar.gz", hash = "sha256:cf2d9cf4867812c06788f64c15e49abd909d9d6291f0a13f1c3f9cb649fa6127", size = 1891150, upload-time = "2026-05-20T22:47:23.94Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/76/ee/47127a539b73361e141d578ab0e3afdeae16918048359f378cf1c7116a2e/livekit_wakeword-0.2.1-py3-none-any.whl", hash = "sha256:9576e103b6777619342ef9cce1d47727c39f1d6b7b564238f3467ace4d10a99a", size = 1911465, upload-time = "2026-05-20T22:47:21.824Z" },
+]
+
+[[package]]
 name = "lxml"
 version = "6.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1751,6 +1764,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "faster-whisper" },
+    { name = "livekit-wakeword" },
     { name = "numpy" },
     { name = "onvif-zeep" },
     { name = "sentence-transformers" },
@@ -1772,6 +1786,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "faster-whisper", specifier = ">=1.1.0" },
+    { name = "livekit-wakeword", specifier = ">=0.2.1,<0.3.0" },
     { name = "numpy", specifier = ">=2.1.0" },
     { name = "onvif-zeep", specifier = ">=0.2.12" },
     { name = "sentence-transformers", specifier = ">=5.0.0" },

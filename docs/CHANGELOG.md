@@ -4,6 +4,14 @@
 
 ### 改善 (Improvements)
 
+- 標準ウェイクワードを、LiveKit WakeWordの専用ONNXモデルによる
+  「ねぇ、ヤタガラス」検出へ変更
+- OFF状態のSTT常時実行を廃止し、CPU向けONNX推論をVAD連動の可変間隔で実行
+- ウェイク検出後に同梱した`VOICEVOX:青山龍星`の「はい」を再生してから命令受付へ遷移
+- `LISTEND_WAKE_BACKEND="stt"`で従来の文字列ウェイクを互換backendとして維持
+- `yatagarasu doctor`へONNX shape、SHA-256、CPU Provider、smoke inference、
+  prompt音声の診断を追加
+- 新規標準話者をVOICEVOX 青山龍星（`SPEAKER_ID="13"`）へ変更
 - `bin/yatagarasu` が Codex CLI / Claude Code / opencode を選択実行できるようになった
   - `YATAGARASU_ENGINE`
   - `YATAGARASU_CODEX_MODEL`

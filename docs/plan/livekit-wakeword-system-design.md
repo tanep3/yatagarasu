@@ -610,7 +610,7 @@ class WakeSettings:
 | `LISTEND_WAKE_THRESHOLD` | float | `0.6` | `0.0 < value <= 1.0` |
 | `LISTEND_WAKE_DEBOUNCE_SEC` | float | `2.0` | `>= 0` |
 | `LISTEND_WAKE_ACTIVE_INTERVAL_SEC` | float | `0.16` | `> 0` |
-| `LISTEND_WAKE_IDLE_INTERVAL_SEC` | float | `1.0` | active以上 |
+| `LISTEND_WAKE_IDLE_INTERVAL_SEC` | float | `1.5` | active以上 |
 | `LISTEND_WAKE_SPEECH_HOLD_SEC` | float | `2.0` | `>= 0` |
 | `LISTEND_WAKE_WARMUP_SEC` | float | `0.0` | `0.0 <= value <= 2.0` |
 | `LISTEND_WAKE_PROMPT_AUDIO` | path | 同梱MP3 | readable file |
@@ -661,6 +661,8 @@ STT backendではmodelとpromptの存在を起動必須条件にしない。
 - PyAudioとPortAudioを導入しない
 - `livekit-wakeword`の通常依存であるCPU版`onnxruntime`を使用する
 - `CPUExecutionProvider`以外を要求しない
+- mel、speech embedding、classifierの各ONNX Sessionは
+  intra-op / inter-opとも1 thread、sequential executionへ固定する
 - training / eval / export extrasは導入しない
 
 ### 15.2 asset
@@ -897,7 +899,7 @@ fake clockを使用し、実時間sleepを使わない。
 - pending request: 最大1
 - RTSP read timeout: 0
 - worker fatal error: 0
-- 無音時推論回数: おおむね1回/秒
+- 無音時推論回数: おおむね2回/3秒
 
 追加CPU使用率は、1論理CPU基準で平均5 percentage points以下を目標とする。
 発話試験では、1mの距離から2人以上が合計30回発話し、27回以上の検出率を
@@ -946,7 +948,7 @@ fake clockを使用し、実時間sleepを使わない。
 
 - threshold: `0.6`
 - active interval: `0.16`
-- idle interval: `1.0`
+- idle interval: `1.5`
 - speech hold: `2.0`
 - warmup: `0.0`
 - prompt guard: `0.8`

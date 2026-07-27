@@ -344,6 +344,7 @@ network_access = true
                 "YATAGARASU_ENGINE": "codex",
                 "YATAGARASU_CODEX_PROFILE": "yatagarasu-local",
                 "HOSHIKAGE_API_KEY": "test-secret-token",
+                "LISTEND_WAKE_BACKEND": "stt",
             }
         )
 

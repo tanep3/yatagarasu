@@ -33,6 +33,10 @@ Summary:
 - VOICEVOX ENGINE: LGPL-3.0 (plus upstream dual-license notes)
 - SearXNG: AGPL-3.0-or-later
 - SemanticMemory: MIT
+- LiveKit WakeWord: Apache-2.0
+- VoxCPM: Apache-2.0
+- nee_yatagarasu wake word model: Apache-2.0
+- wake prompt voice: VOICEVOX:青山龍星 (VOICEVOX and character terms apply)
 - ReazonSpeech: Apache-2.0
 - faster-whisper: MIT
 - silero-vad: MIT

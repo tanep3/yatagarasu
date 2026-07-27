@@ -68,6 +68,28 @@ GO2RTC_FRAME_API_ENABLED="true"
 
 初回はモデル取得が必要です。運用で安定した後は `YATAGARASU_SBERT_OFFLINE="true"` にすると、キャッシュ済みモデルだけを使います。
 
+## ウェイクワード
+
+標準設定では、専用ONNXモデルが「ねぇ、ヤタガラス」を検出します。
+OFF状態でSTTを常時実行しないため、従来の文字列ウェイクより軽く、認識表記にも依存しません。
+検出後は同梱済みの「はい」を再生してから命令音声を受け付けます。
+
+```bash
+LISTEND_WAKE_BACKEND="livekit"
+LISTEND_WAKE_THRESHOLD="0.6"
+LISTEND_WAKE_WARMUP_SEC="0.0"
+LISTEND_WAKE_PROMPT_GUARD_SEC="0.8"
+LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
+```
+
+従来方式へ戻す場合は`LISTEND_WAKE_BACKEND="stt"`を指定します。
+ONNX方式のウェイク語は`.env`の文字列変更では変わりません。別のウェイク語には
+対応するONNXモデルが必要です。
+
+ウェイク検出時の応答音声には、VOICEVOXで生成した青山龍星の音声を使用しています。
+
+`VOICEVOX:青山龍星`
+
 ## LLM実行基盤（Codex CLI / Claude Code / opencode）
 
 `bin/yatagarasu` は内部でAIエージェントCLIを呼び出します。  
@@ -145,6 +167,7 @@ bin/yatagarasu doctor --verbose
 - Codex CLI / Claude Code / opencode
 - VOICEVOX / go2rtc
 - `zunda` / `tapovoice` / `ffmpeg`
+- LiveKit WakeWord / ONNXモデル / CPU Provider / prompt音声
 - `yatagarasu.service` / `go2rtc.service`
 - 直近ログのエラー傾向
 
@@ -184,6 +207,8 @@ git pull --ff-only
 | sentence-transformers | SBERT Skill Router | Apache-2.0 | https://github.com/UKPLab/sentence-transformers |
 | Transformers | SBERT Skill Router | Apache-2.0 | https://github.com/huggingface/transformers |
 | SentencePiece | Ruri v3 tokenizer | Apache-2.0 | https://github.com/google/sentencepiece |
+| LiveKit WakeWord | ONNXウェイクワード推論 | Apache-2.0 | https://github.com/livekit/livekit-wakeword |
+| VoxCPM | ウェイクワード学習用合成音声 | Apache-2.0 | https://github.com/OpenBMB/VoxCPM |
 
 ## 使用モデルとライセンス
 
@@ -194,11 +219,14 @@ git pull --ff-only
 | `cl-nagoya/ruri-small-v2` | SemanticMemory埋め込み（移行前） | Apache-2.0 | https://huggingface.co/cl-nagoya/ruri-small-v2 |
 | `cl-nagoya/ruri-v3-70m` | SBERT Skill Router / SemanticMemory移行候補 | Apache-2.0 | https://huggingface.co/cl-nagoya/ruri-v3-70m |
 | `SakanaAI/TinySwallow-1.5B-Instruct-GGUF` | SemanticMemory要約 | Apache-2.0 + Gemma Terms（SemanticMemory README記載） | https://huggingface.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF |
+| `nee_yatagarasu.onnx` | 「ねぇ、ヤタガラス」検出 | Apache-2.0 / Tane Channel Technology | `models/wakeword/README.md` |
 
 補足:
 
 - モデル重み・音声ライブラリは本リポジトリに同梱していないものが含まれます。
 - 実運用時に取得するモデル/音声ライブラリの最新規約を必ず確認してください。
+- 同梱のウェイク応答音声を利用・再配布する場合は
+  `VOICEVOX:青山龍星`のクレジットを表示し、VOICEVOXと青山龍星の規約に従ってください。
 
 ## 配布とコンプライアンス
 

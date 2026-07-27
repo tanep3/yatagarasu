@@ -37,6 +37,7 @@ uv sync
 補足:
 - `python/pyproject.toml` は `requires-python >=3.11`。
 - `uv sync` で `faster-whisper` / `silero-vad` / `torch` を導入する。
+- `uv sync`で`livekit-wakeword`とCPU版ONNX Runtimeを導入する。
 - SBERT Skill Router 用の `sentence-transformers` / `transformers` / `sentencepiece` も `uv sync` で導入する。
 - CUDA 依存を避けるため、`torch` / `torchaudio` は `python/pyproject.toml` の `pytorch-cpu` index から導入する。
 
@@ -63,12 +64,19 @@ cp workspace/.env.example workspace/.env
 ```env
 LISTEND_RTSP_URL="rtsp://localhost:8554/tapo_tc70"
 LISTEND_RTSP_TRANSPORT="tcp"
-LISTEND_WAKE_WORDS="ヤタガラス"
+LISTEND_WAKE_BACKEND="livekit"
+LISTEND_WAKE_MODEL_PATH=""
+LISTEND_WAKE_THRESHOLD="0.6"
+LISTEND_WAKE_WARMUP_SEC="0.0"
+LISTEND_WAKE_PROMPT_AUDIO=""
+LISTEND_WAKE_PROMPT_GUARD_SEC="0.8"
+LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
+LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス"
 LISTEND_STOP_WORDS="ストップ"
 LISTEND_STT_BACKEND="faster-whisper"
 LISTEND_WHISPER_MODEL="base"
 LISTEND_SESSION_END_SILENCE_SEC="3"
-LISTEND_SILENCE_TIMEOUT_SEC="10"
+LISTEND_SILENCE_TIMEOUT_SEC="3"
 ```
 
 ReazonSpeech k2 を使う場合:

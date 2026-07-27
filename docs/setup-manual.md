@@ -193,9 +193,12 @@ TAPO_RTSP_PASSWORD="<camera-account-password>"
 
 # listend
 LISTEND_RTSP_URL="rtsp://localhost:8554/tapo_tc70"
-LISTEND_WAKE_WORDS="ヤタガラス"
+LISTEND_WAKE_BACKEND="livekit"
+LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス"
 LISTEND_STOP_WORDS="ストップ"
 LISTEND_STT_BACKEND="faster-whisper"   # or reazonspeech-k2
+LISTEND_SILENCE_TIMEOUT_SEC="3"
+SPEAKER_ID="13"
 ```
 
 SBERT Skill Routerを使う場合は、まずdry-runで判定だけ確認してから実行を有効化します。
@@ -224,7 +227,9 @@ uv venv
 uv sync
 ```
 
-SBERT Skill Router 用の `sentence-transformers` / `transformers` / `sentencepiece` も `uv sync` で導入されます。
+LiveKit WakeWord、SBERT Skill Router用の
+`livekit-wakeword` / `sentence-transformers` / `transformers` / `sentencepiece`も
+`uv sync`で導入されます。
 CUDA 依存を避けるため、`torch` / `torchaudio` は `python/pyproject.toml` の `pytorch-cpu` index から導入します。
 
 `ReazonSpeech k2` を使う場合のみ追加インストール:
@@ -232,6 +237,9 @@ CUDA 依存を避けるため、`torch` / `torchaudio` は `python/pyproject.tom
 ```bash
 uv pip install ../external/ReazonSpeech/pkg/k2-asr
 ```
+
+`uv sync`はプロジェクト外から手動導入したReazonSpeechを環境から外すことがあります。
+ReazonSpeech利用環境では、コード更新時も必ず`uv sync`の後に上記コマンドを実行してください。
 
 ## 4.1 SBERT Skill Router
 
@@ -456,13 +464,14 @@ bin/yatagarasu doctor
 bin/yatagarasu doctor --verbose
 ```
 
-`doctor` は `.env`、AIエージェントCLI、VOICEVOX、go2rtc、音声送信コマンド、systemdサービス、直近ログを確認します。
+`doctor`は`.env`、AIエージェントCLI、VOICEVOX、go2rtc、音声送信コマンド、
+LiveKit WakeWord、ONNXモデル、CPU Provider、prompt音声、systemdサービス、直近ログを確認します。
 
 ## 8.1 音声出力チェーン
 
 ```bash
 cd /home/<user>/.../yatagarasu
-./bin/zunda "テストです" --stdout -s 68 | ./bin/tapovoice
+./bin/zunda "テストです" --stdout -s 13 | ./bin/tapovoice
 ```
 
 ## 8.2 go2rtc 経由の音声取り込み
@@ -478,6 +487,19 @@ ffplay -nodisp -autoexit /tmp/listend_dbg.wav
 ```bash
 cd /home/<user>/.../yatagarasu
 YATAGARASU_CWD="$(pwd)/workspace" LISTEND_LOG_LEVEL=DEBUG ./python/.venv/bin/python ./python/listend.py
+```
+
+標準ウェイク動作:
+
+1. カメラから1m程度の位置で「ねぇ、ヤタガラス」と発話する。
+2. 青山龍星の「はい」が再生されることを確認する。
+3. prompt再生後に「右を向いて」などの命令を発話する。
+4. ログに`OFF -> WAKING -> ON`とONNX scoreが記録されることを確認する。
+
+従来のSTTウェイクへ戻す場合:
+
+```env
+LISTEND_WAKE_BACKEND="stt"
 ```
 
 ## 9. よくあるトラブル

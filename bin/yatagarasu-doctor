@@ -373,6 +373,110 @@ PY
     fi
 }
 
+check_livekit_wakeword() {
+    local python_bin="$PROJECT_ROOT/python/.venv/bin/python"
+    local model_path="${LISTEND_WAKE_MODEL_PATH:-}"
+    local prompt_path="${LISTEND_WAKE_PROMPT_AUDIO:-}"
+    local expected_model_hash=""
+    local expected_prompt_hash=""
+    local output
+
+    info "wake backend: $LISTEND_WAKE_BACKEND"
+    if [[ "$LISTEND_WAKE_BACKEND" == "stt" ]]; then
+        ok "wake backend value: stt (compatibility mode)"
+        info "wake words: ${LISTEND_WAKE_WORDS:-"(not set)"}"
+        return
+    fi
+    if [[ "$LISTEND_WAKE_BACKEND" != "livekit" ]]; then
+        fail "wake backend is unsupported: $LISTEND_WAKE_BACKEND"
+        return
+    fi
+
+    if [[ -z "$model_path" ]]; then
+        model_path="$PROJECT_ROOT/models/wakeword/nee_yatagarasu.onnx"
+        expected_model_hash="0a2926bf00ff15c24e6ed0cf09e60e5550339439db5103335a517d9d0a70feb8"
+    elif [[ "$model_path" != /* ]]; then
+        model_path="$WORKSPACE/$model_path"
+    fi
+    if [[ -z "$prompt_path" ]]; then
+        prompt_path="$PROJECT_ROOT/assets/audio/wake_prompt_hai.mp3"
+        expected_prompt_hash="5039cd6f77dd7d57db65edefac5b2f56356f4f4a3c04a6ef9d42fd16c2d13257"
+    elif [[ "$prompt_path" != /* ]]; then
+        prompt_path="$WORKSPACE/$prompt_path"
+    fi
+
+    if [[ ! -x "$python_bin" ]]; then
+        fail "wake runtime: Python environment not found ($python_bin)"
+        return
+    fi
+
+    if output="$("$python_bin" - "$model_path" "$prompt_path" "$expected_model_hash" "$expected_prompt_hash" "$PROJECT_ROOT/python" <<'PY' 2>&1
+import hashlib
+import stat
+import sys
+from pathlib import Path
+
+import numpy as np
+import onnxruntime as ort
+
+model_path = Path(sys.argv[1])
+prompt_path = Path(sys.argv[2])
+expected_model_hash = sys.argv[3]
+expected_prompt_hash = sys.argv[4]
+sys.path.insert(0, sys.argv[5])
+
+from wakeword import build_cpu_predictor
+
+def validate_asset(path: Path, expected_hash: str) -> str:
+    if not path.is_file():
+        raise RuntimeError(f"asset not found: {path}")
+    mode = stat.S_IMODE(path.stat().st_mode)
+    if mode != 0o644:
+        raise RuntimeError(f"asset mode must be 0644: {path} ({mode:o})")
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if expected_hash and digest != expected_hash:
+        raise RuntimeError(f"asset SHA-256 mismatch: {path}")
+    return digest
+
+model_hash = validate_asset(model_path, expected_model_hash)
+prompt_hash = validate_asset(prompt_path, expected_prompt_hash)
+if "CPUExecutionProvider" not in ort.get_available_providers():
+    raise RuntimeError("CPUExecutionProvider is unavailable")
+
+classifier = ort.InferenceSession(
+    str(model_path),
+    providers=["CPUExecutionProvider"],
+)
+input_meta = classifier.get_inputs()[0]
+output_meta = classifier.get_outputs()[0]
+if input_meta.shape != ["batch", 16, 96] and input_meta.shape != [None, 16, 96]:
+    raise RuntimeError(f"unexpected classifier input shape: {input_meta.shape}")
+if output_meta.shape != ["batch", 1] and output_meta.shape != [None, 1]:
+    raise RuntimeError(f"unexpected classifier output shape: {output_meta.shape}")
+
+predict = build_cpu_predictor(model_path)
+scores = predict(np.zeros(32_000, dtype=np.int16))
+score = scores.get(model_path.stem)
+if score is None or not np.isfinite(score) or not 0.0 <= score <= 1.0:
+    raise RuntimeError(f"invalid smoke inference score: {scores}")
+
+print(f"model={model_path}")
+print(f"model_sha256={model_hash}")
+print(f"prompt={prompt_path}")
+print(f"prompt_sha256={prompt_hash}")
+print(f"provider=CPUExecutionProvider")
+print(f"smoke_score={score:.6f}")
+PY
+    )"; then
+        ok "LiveKit WakeWord runtime and bundled assets"
+        while IFS= read -r line; do
+            info "$line"
+        done <<<"$output"
+    else
+        fail "LiveKit WakeWord runtime: $output"
+    fi
+}
+
 print_header() {
     cat <<EOF
 Yatagarasu Doctor
@@ -397,6 +501,9 @@ GO2RTC_API_PORT="${GO2RTC_API_PORT:-1984}"
 VOICEVOX_ENGINE_HOST="${VOICEVOX_ENGINE_HOST:-127.0.0.1}"
 VOICEVOX_ENGINE_PORT="${VOICEVOX_ENGINE_PORT:-50021}"
 LISTEND_STT_BACKEND="${LISTEND_STT_BACKEND:-faster-whisper}"
+LISTEND_WAKE_BACKEND="${LISTEND_WAKE_BACKEND:-livekit}"
+LISTEND_WAKE_MODEL_PATH="${LISTEND_WAKE_MODEL_PATH:-}"
+LISTEND_WAKE_PROMPT_AUDIO="${LISTEND_WAKE_PROMPT_AUDIO:-}"
 LISTEND_WAKE_WORDS="${LISTEND_WAKE_WORDS:-}"
 LISTEND_DISPATCH_TIMEOUT_SEC="${LISTEND_DISPATCH_TIMEOUT_SEC:-}"
 
@@ -429,6 +536,7 @@ check_command "python3" "python3"
 check_command "uv" "uv"
 check_executable "zunda" "$SCRIPT_DIR/zunda"
 check_executable "tapovoice" "$SCRIPT_DIR/tapovoice"
+check_livekit_wakeword
 
 case "$ENGINE" in
     auto|codex|claude|opencode)
@@ -471,7 +579,6 @@ else
 fi
 
 info "STT backend: $LISTEND_STT_BACKEND"
-info "wake words: ${LISTEND_WAKE_WORDS:-"(not set)"}"
 info "dispatch timeout: ${LISTEND_DISPATCH_TIMEOUT_SEC:-"(default)"}"
 
 if [[ "$CHECK_SERVICES" == true ]]; then

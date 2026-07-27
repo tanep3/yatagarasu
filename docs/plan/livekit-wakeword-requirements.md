@@ -217,7 +217,7 @@ LISTEND_WAKE_MODEL_PATH=""
 LISTEND_WAKE_THRESHOLD="0.6"
 LISTEND_WAKE_DEBOUNCE_SEC="2.0"
 LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.16"
-LISTEND_WAKE_IDLE_INTERVAL_SEC="1.0"
+LISTEND_WAKE_IDLE_INTERVAL_SEC="1.5"
 LISTEND_WAKE_SPEECH_HOLD_SEC="2.0"
 LISTEND_WAKE_WARMUP_SEC="0.0"
 
@@ -279,7 +279,7 @@ SPEAKER_ID="13"
 - ONNX推論がRTSP音声読込、VAD、STTをブロックしないこと。
 - ONNXモデルの入力窓は常に2秒分とし、短い入力を直接渡さないこと。
 - 標準設定では、起動・reset後の最初の音声チャンクから推論可能であること。
-- 待機中は1秒間隔、発話中は160ms間隔を初期値とし、常時80ms間隔では推論しないこと。
+- 待機中は1.5秒間隔、発話中は160ms間隔を初期値とし、常時80ms間隔では推論しないこと。
 - 第8世代Core i7で60秒のウォームアップ後、5分間の無音待機を測定し、
   ONNXウェイク導入による`listend`の追加CPU使用率を平均5 percentage points以下とすることを
   性能目標とする。

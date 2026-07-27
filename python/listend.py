@@ -5,10 +5,11 @@ listend.py
 RTSP音声を常時監視し、以下を実行する。
 - Silero VAD で有音/無音判定
 - STTバックエンド（faster-whisper / ReazonSpeech k2）で発話セグメントを文字起こし
-- OFF時は文字起こし結果の wake word 検出で ON に遷移
+- OFF時は専用ONNXモデル（既定）またはSTT文字列で wake word を検出
+- ONNX検出後は同梱音声を再生してから命令受付へ遷移
 - ON時は stop word 検出で OFF に遷移
 - ON時は無音 3 秒（デフォルト）で 1 ターンを確定して yatagarasu に渡す
-- ON時は無音 30 秒（デフォルト）で OFF に戻る
+- ON時は無音 3 秒（デフォルト）で OFF に戻る
 """
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from enum import Enum
 from pathlib import Path
 from typing import Iterable
 
@@ -39,7 +39,15 @@ import torch
 from faster_whisper import WhisperModel
 from silero_vad import get_speech_timestamps, load_silero_vad
 
+from audio_prompt import PromptStatus, TapovoiceFilePromptPlayer
 from intent_router import IntentRouter, RouterDecision
+from listen_state import (
+    ListenSession,
+    ListenState,
+    SessionAction,
+    SessionDecision,
+)
+from wakeword import LiveKitWakeBackend, SttWakeBackend, WakeBackend
 
 DEFAULT_AUDIO_FILTER = "highpass=f=120,lowpass=f=5000"
 DEFAULT_SEGMENT_END_SILENCE_CHUNKS = 5
@@ -54,12 +62,6 @@ DEFAULT_REAZON_MAX_SEGMENT_SEC = 28.0
 _AUTO_TRANSPORT_ORDER = ("tcp", "udp")
 # ffmpeg 起動後、最初のデータを待つタイムアウト（秒）
 _INITIAL_DATA_PROBE_SEC = 5.0
-
-
-class ListenState(str, Enum):
-    OFF = "OFF"
-    WAKE_DETECTED = "WAKE_DETECTED"
-    ON = "ON"
 
 
 def normalize_stt_backend(value: str) -> str:
@@ -125,6 +127,29 @@ def env_float(name: str, default: float) -> float:
         return default
 
 
+def env_float_strict(
+    name: str,
+    default: float,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+    minimum_inclusive: bool = True,
+) -> float:
+    value = os.getenv(name, "").strip()
+    try:
+        parsed = default if not value else float(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number: {value}") from exc
+    if minimum is not None:
+        invalid = parsed < minimum if minimum_inclusive else parsed <= minimum
+        if invalid:
+            operator = ">=" if minimum_inclusive else ">"
+            raise ValueError(f"{name} must be {operator} {minimum}: {parsed}")
+    if maximum is not None and parsed > maximum:
+        raise ValueError(f"{name} must be <= {maximum}: {parsed}")
+    return parsed
+
+
 def env_csv(name: str, default: Iterable[str]) -> tuple[str, ...]:
     value = os.getenv(name, "").strip()
     if not value:
@@ -156,6 +181,21 @@ def build_rtsp_url_from_legacy_env() -> str:
 
 
 @dataclass(frozen=True)
+class WakeSettings:
+    backend: str
+    model_path: Path
+    threshold: float
+    debounce_sec: float
+    active_interval_sec: float
+    idle_interval_sec: float
+    speech_hold_sec: float
+    warmup_sec: float
+    prompt_audio_path: Path
+    prompt_guard_sec: float
+    prompt_timeout_sec: float
+
+
+@dataclass(frozen=True)
 class ListendSettings:
     workspace_path: Path
     rtsp_url: str
@@ -170,6 +210,7 @@ class ListendSettings:
     reazon_device: str
     reazon_precision: str
     reazon_language: str
+    wake: WakeSettings
     wake_words: tuple[str, ...]
     wake_prompt_word: str
     stop_words: tuple[str, ...]
@@ -258,7 +299,7 @@ class ListendSettings:
         wake_ack_speaker_id = (
             os.getenv("LISTEND_WAKE_ACK_SPEAKER_ID", "").strip()
             or os.getenv("SPEAKER_ID", "").strip()
-            or "68"
+            or "13"
         )
         wake_ack_zunda_cmd = os.getenv("LISTEND_WAKE_ACK_ZUNDA_CMD", "").strip()
         if not wake_ack_zunda_cmd:
@@ -268,6 +309,100 @@ class ListendSettings:
             wake_ack_tapovoice_cmd = str(
                 (workspace_path.parent / "bin" / "tapovoice").resolve()
             )
+
+        wake_backend = os.getenv("LISTEND_WAKE_BACKEND", "livekit").strip().lower()
+        if wake_backend not in {"livekit", "stt"}:
+            raise ValueError(
+                "LISTEND_WAKE_BACKEND must be 'livekit' or 'stt': "
+                f"{wake_backend}"
+            )
+
+        def resolve_wake_path(env_name: str, default: Path) -> Path:
+            raw = os.getenv(env_name, "").strip()
+            if not raw:
+                return default.resolve()
+            path = Path(raw).expanduser()
+            if not path.is_absolute():
+                path = workspace_path / path
+            return path.resolve()
+
+        active_interval_sec = env_float_strict(
+            "LISTEND_WAKE_ACTIVE_INTERVAL_SEC",
+            0.16,
+            minimum=0.0,
+            minimum_inclusive=False,
+        )
+        idle_interval_sec = env_float_strict(
+            "LISTEND_WAKE_IDLE_INTERVAL_SEC",
+            1.5,
+            minimum=active_interval_sec,
+        )
+        wake_settings = WakeSettings(
+            backend=wake_backend,
+            model_path=resolve_wake_path(
+                "LISTEND_WAKE_MODEL_PATH",
+                workspace_path.parent
+                / "models"
+                / "wakeword"
+                / "nee_yatagarasu.onnx",
+            ),
+            threshold=env_float_strict(
+                "LISTEND_WAKE_THRESHOLD",
+                0.6,
+                minimum=0.0,
+                maximum=1.0,
+                minimum_inclusive=False,
+            ),
+            debounce_sec=env_float_strict(
+                "LISTEND_WAKE_DEBOUNCE_SEC",
+                2.0,
+                minimum=0.0,
+            ),
+            active_interval_sec=active_interval_sec,
+            idle_interval_sec=idle_interval_sec,
+            speech_hold_sec=env_float_strict(
+                "LISTEND_WAKE_SPEECH_HOLD_SEC",
+                2.0,
+                minimum=0.0,
+            ),
+            warmup_sec=env_float_strict(
+                "LISTEND_WAKE_WARMUP_SEC",
+                0.0,
+                minimum=0.0,
+                maximum=2.0,
+            ),
+            prompt_audio_path=resolve_wake_path(
+                "LISTEND_WAKE_PROMPT_AUDIO",
+                workspace_path.parent / "assets" / "audio" / "wake_prompt_hai.mp3",
+            ),
+            prompt_guard_sec=env_float_strict(
+                "LISTEND_WAKE_PROMPT_GUARD_SEC",
+                0.8,
+                minimum=0.0,
+            ),
+            prompt_timeout_sec=env_float_strict(
+                "LISTEND_WAKE_PROMPT_TIMEOUT_SEC",
+                2.0,
+                minimum=0.0,
+                minimum_inclusive=False,
+            ),
+        )
+        sample_rate = env_int("LISTEND_SAMPLE_RATE", 16000)
+        channels = env_int("LISTEND_CHANNELS", 1)
+        if wake_backend == "livekit":
+            if sample_rate != 16000 or channels != 1:
+                raise ValueError(
+                    "LISTEND_WAKE_BACKEND=livekit requires "
+                    "LISTEND_SAMPLE_RATE=16000 and LISTEND_CHANNELS=1"
+                )
+            if not wake_settings.model_path.is_file():
+                raise ValueError(
+                    f"wake word model not found: {wake_settings.model_path}"
+                )
+            if not wake_settings.prompt_audio_path.is_file():
+                raise ValueError(
+                    f"wake prompt audio not found: {wake_settings.prompt_audio_path}"
+                )
 
         if os.getenv("LISTEND_SEGMENT_END_SILENCE_CHUNKS", "").strip():
             logging.warning(
@@ -327,6 +462,7 @@ class ListendSettings:
             reazon_device=os.getenv("LISTEND_REAZON_DEVICE", "cpu").strip() or "cpu",
             reazon_precision=reazon_precision,
             reazon_language=reazon_language,
+            wake=wake_settings,
             wake_words=wake_words,
             wake_prompt_word=wake_prompt_word,
             stop_words=stop_words,
@@ -336,12 +472,12 @@ class ListendSettings:
                 "LISTEND_OFF_TRANSCRIBE_COOLDOWN_SEC", 0.0
             ),
             wake_suppression_sec=env_float("LISTEND_WAKE_SUPPRESSION_SEC", 2.0),
-            silence_timeout_sec=env_float("LISTEND_SILENCE_TIMEOUT_SEC", 30.0),
+            silence_timeout_sec=env_float("LISTEND_SILENCE_TIMEOUT_SEC", 3.0),
             session_end_silence_sec=env_float("LISTEND_SESSION_END_SILENCE_SEC", 3.0),
             chunk_ms=env_int("LISTEND_CHUNK_MS", 80),
             segment_end_silence_chunks=DEFAULT_SEGMENT_END_SILENCE_CHUNKS,
-            sample_rate=env_int("LISTEND_SAMPLE_RATE", 16000),
-            channels=env_int("LISTEND_CHANNELS", 1),
+            sample_rate=sample_rate,
+            channels=channels,
             dispatch_cmd=dispatch_cmd,
             dispatch_timeout_sec=env_float("LISTEND_DISPATCH_TIMEOUT_SEC", 20.0),
             wake_ack_word=wake_ack_word,
@@ -519,7 +655,11 @@ class PtzWorker:
 class ListendService:
     def __init__(self, settings: ListendSettings) -> None:
         self.settings = settings
-        self.state = ListenState.OFF
+        self.session = ListenSession(
+            prompt_guard_sec=settings.wake.prompt_guard_sec,
+            session_end_silence_sec=settings.session_end_silence_sec,
+            silence_timeout_sec=settings.silence_timeout_sec,
+        )
         self.stop_requested = False
 
         self.in_segment = False
@@ -532,7 +672,10 @@ class ListendService:
         self.wake_ack_pending = False
         self.last_off_transcribe_at = 0.0
         self.last_wake_ack_at = 0.0
+        self.last_system_audio_at = 0.0
         self.chunk_index = 0
+        self._handled_prompt_status = PromptStatus.IDLE
+        self._wake_suppressed = False
 
         self.vad_model = load_silero_vad()
         self.whisper_model: WhisperModel | None = None
@@ -540,11 +683,35 @@ class ListendService:
         self.reazon_audio_from_numpy: object | None = None
         self.reazon_transcribe: object | None = None
         self._init_stt_backend()
+        self.wake_backend = self._init_wake_backend()
+        tapovoice_argv = shlex.split(self.settings.wake_ack_tapovoice_cmd)
+        self.prompt_player = TapovoiceFilePromptPlayer(
+            tapovoice_argv,
+            timeout_sec=self.settings.wake.prompt_timeout_sec,
+        )
         self.intent_router = self._init_intent_router()
         skill_root = self.settings.workspace_path / ".codex" / "skills"
         self.ptz_worker = PtzWorker(skill_root, self.settings.workspace_path)
         if self.intent_router is not None and not self.intent_router.settings.dry_run:
             self.ptz_worker._ensure_started(env_float("YATAGARASU_SBERT_MOVE_TIMEOUT_SEC", 8.0))
+
+    @property
+    def state(self) -> ListenState:
+        return self.session.state
+
+    def _init_wake_backend(self) -> WakeBackend:
+        if self.settings.wake.backend == "stt":
+            return SttWakeBackend()
+        wake = self.settings.wake
+        return LiveKitWakeBackend(
+            model_path=wake.model_path,
+            threshold=wake.threshold,
+            debounce_sec=wake.debounce_sec,
+            active_interval_sec=wake.active_interval_sec,
+            idle_interval_sec=wake.idle_interval_sec,
+            speech_hold_sec=wake.speech_hold_sec,
+            warmup_sec=wake.warmup_sec,
+        )
 
     def _init_stt_backend(self) -> None:
         if self.settings.stt_backend == "faster-whisper":
@@ -588,6 +755,11 @@ class ListendService:
 
     def request_stop(self) -> None:
         self.stop_requested = True
+        self.ptz_worker.stop()
+
+    def close(self) -> None:
+        self.prompt_player.close()
+        self.wake_backend.close()
         self.ptz_worker.stop()
 
     def _resolve_transports(self) -> list[str]:
@@ -669,6 +841,8 @@ class ListendService:
                 )
                 time.sleep(self.settings.reconnect_delay_sec)
                 continue
+
+            self._reset_for_audio_connection(time.monotonic())
 
             # --- メインオーディオ読み取りループ ---
             try:
@@ -908,6 +1082,7 @@ class ListendService:
 
         now = time.monotonic()
         has_speech = self._has_speech(pcm)
+        self._poll_waking(now)
         logging.debug(
             "chunk pcm=%d speech=%s in_seg=%s hangover=%d",
             pcm.size,
@@ -916,8 +1091,57 @@ class ListendService:
             self.vad_hangover_remaining,
         )
 
+        if self.state is ListenState.WAKING:
+            return
+
+        if (
+            self.state is ListenState.OFF
+            and not self.wake_backend.requires_off_transcription
+        ):
+            suppression_deadline = (
+                self.last_system_audio_at + self.settings.wake_suppression_sec
+            )
+            if now < suppression_deadline:
+                if not self._wake_suppressed:
+                    self.wake_backend.reset_audio()
+                    self._wake_suppressed = True
+                return
+            if self._wake_suppressed:
+                self.wake_backend.reset_audio()
+                self._wake_suppressed = False
+
+            self.wake_backend.feed_audio(
+                pcm,
+                has_speech=has_speech,
+                now=now,
+            )
+            detection = self.wake_backend.poll(now=now)
+            if detection is not None:
+                logging.info(
+                    "wake detected model=%s score=%.4f threshold=%.4f",
+                    detection.model_name,
+                    detection.score,
+                    detection.threshold,
+                )
+                self._apply_session_decision(self.session.on_livekit_wake(now), now)
+            return
+
+        self._feed_segment(chunk, has_speech=has_speech, now=now)
+
+    def _reset_for_audio_connection(self, now: float) -> None:
+        decision = self.session.on_reconnect(now)
+        self.prompt_player.close()
+        self._reset_audio_session()
+        self.wake_backend.reset_audio()
+        self._handled_prompt_status = PromptStatus.IDLE
+        self._wake_suppressed = False
+        if decision.action is not SessionAction.NONE:
+            logging.info("state transition: -> OFF (%s)", decision.reason)
+
+    def _feed_segment(self, chunk: bytes, *, has_speech: bool, now: float) -> None:
         if has_speech:
             self.last_voice_at = now
+            self.session.on_voice_detected(now)
             self.in_segment = True
             self.trailing_silence_chunks = 0
             self.segment_buffer.extend(chunk)
@@ -945,25 +1169,92 @@ class ListendService:
             self._handle_on_silence(now)
 
     def _handle_on_silence(self, now: float) -> None:
-        idle_sec = now - self.last_voice_at
+        decision = self.session.tick(
+            now,
+            has_pending_text=bool(self.session_text_chunks),
+        )
+        self._apply_session_decision(decision, now)
 
-        if self.session_text_chunks and idle_sec >= self.settings.session_end_silence_sec:
-            self._dispatch_session(
-                reason=(
-                    f"session end silence ({idle_sec:.1f}s >= "
-                    f"{self.settings.session_end_silence_sec:.1f}s)"
+    def _poll_waking(self, now: float) -> None:
+        if self.state is not ListenState.WAKING:
+            return
+
+        status = self.prompt_player.poll(now=now)
+        if status is not self._handled_prompt_status:
+            self._handled_prompt_status = status
+            if status is PromptStatus.SUCCEEDED:
+                logging.info("wake prompt sent; guard started")
+                decision = self.session.on_prompt_succeeded(now)
+                self._apply_session_decision(decision, now)
+            elif status in {PromptStatus.FAILED, PromptStatus.TIMED_OUT}:
+                logging.warning("wake prompt %s; entering command mode", status.value)
+                decision = self.session.on_prompt_failed(
+                    now,
+                    f"wake prompt {status.value.lower()}",
                 )
-            )
+                self._apply_session_decision(decision, now)
 
-        # セッションが空（ウェイク後無発話）またはタイムアウトでOFFに戻る
-        if not self.session_text_chunks or idle_sec >= self.settings.silence_timeout_sec:
-            self._set_state(
-                ListenState.OFF,
-                reason=(
-                    f"cancel session (idle_sec={idle_sec:.1f}s "
-                    f"chunks={len(self.session_text_chunks)})"
-                ),
-            )
+        decision = self.session.tick(
+            now,
+            has_pending_text=bool(self.session_text_chunks),
+        )
+        self._apply_session_decision(decision, now)
+
+    def _apply_session_decision(
+        self,
+        decision: SessionDecision,
+        now: float,
+    ) -> None:
+        action = decision.action
+        if action is SessionAction.NONE:
+            return
+
+        if action is SessionAction.START_PROMPT:
+            self._reset_audio_session()
+            self.wake_backend.reset_audio()
+            self._handled_prompt_status = PromptStatus.RUNNING
+            logging.info("state transition: OFF -> WAKING (%s)", decision.reason)
+            try:
+                self.prompt_player.start(
+                    self.settings.wake.prompt_audio_path,
+                    now=now,
+                )
+            except Exception as exc:
+                logging.warning("wake prompt failed to start: %s", exc)
+                self._handled_prompt_status = PromptStatus.FAILED
+                fallback = self.session.on_prompt_failed(
+                    now,
+                    "wake prompt start failed",
+                )
+                self._apply_session_decision(fallback, now)
+            return
+
+        if action is SessionAction.ENTER_ON:
+            self._reset_audio_session()
+            logging.info("state transition: -> ON (%s)", decision.reason)
+            return
+
+        if action is SessionAction.ENTER_OFF:
+            self.prompt_player.close()
+            self._reset_audio_session()
+            self.wake_backend.reset_audio()
+            logging.info("state transition: -> OFF (%s)", decision.reason)
+            if "stop word detected" in decision.reason:
+                self._play_standby_word()
+                self.last_system_audio_at = time.monotonic()
+            return
+
+        if action is SessionAction.DISPATCH:
+            self._dispatch_session(decision.reason)
+            self.session.on_dispatch_completed(time.monotonic())
+
+    def _reset_audio_session(self) -> None:
+        self.in_segment = False
+        self.trailing_silence_chunks = 0
+        self.segment_buffer.clear()
+        self.vad_hangover_remaining = 0
+        self.session_text_chunks.clear()
+        self.wake_ack_pending = False
 
     def _finalize_segment(self) -> None:
         raw = bytes(self.segment_buffer)
@@ -1048,17 +1339,25 @@ class ListendService:
                 if not without_wake_normalized:
                     logging.info("wake word detected but transcription contains only wake words; ignoring to prevent loop")
                     return
-                # ウェイクワード検出時はACK発話してディスパッチ
                 logging.info("wake word detected in OFF segment; dispatching with text")
-                self._set_state(ListenState.ON, "wake word detected in OFF segment")
+                self._apply_session_decision(self.session.on_stt_wake(now), now)
                 self._append_session_text(transcription)
                 # 無音検出時に即時ディスパッチするため、短いタイマー設定
-                self.last_voice_at = time.monotonic() - self.settings.session_end_silence_sec + 0.5
+                dispatch_clock = (
+                    time.monotonic()
+                    - self.settings.session_end_silence_sec
+                    + 0.5
+                )
+                self.last_voice_at = dispatch_clock
+                self.session.on_voice_detected(dispatch_clock)
             return
 
         if stop_hit:
             # stop word検出時はキャンセルしてOFFに戻る（ディスパッチしない）
-            self._set_state(ListenState.OFF, reason="stop word detected (cancel)")
+            self._apply_session_decision(
+                self.session.on_stop(now, "stop word detected (cancel)"),
+                now,
+            )
             return
 
         if wake_hit:
@@ -1074,34 +1373,6 @@ class ListendService:
             self._finalize_segment()
         if self.state == ListenState.ON and self.session_text_chunks:
             self._dispatch_session(reason="shutdown flush")
-
-    def _set_state(self, new_state: ListenState, reason: str) -> None:
-        old_state = self.state
-        self.state = new_state
-
-        if new_state == ListenState.ON:
-            self.session_text_chunks.clear()
-            self.wake_ack_pending = False
-            # LLM呼び出しが確定するまで wake ack は再生しない。
-            # 無音タイマーはON遷移時点を起点にする。
-            self.last_voice_at = time.monotonic()
-
-        if new_state == ListenState.OFF:
-            self.in_segment = False
-            self.trailing_silence_chunks = 0
-            self.segment_buffer.clear()
-            self.vad_hangover_remaining = 0
-            self.session_text_chunks.clear()
-            self.wake_ack_pending = False
-            if old_state != new_state:
-                # ストップワード検出時のみ「ストップ」を発話（無音タイムアウト時は発話しない）
-                if "stop word detected" in reason:
-                    self._play_standby_word()
-
-        if old_state != new_state:
-            logging.info("state transition: %s -> %s (%s)", old_state, new_state, reason)
-        else:
-            logging.info("state stayed: %s (%s)", new_state, reason)
 
     def _append_session_text(self, text: str) -> None:
         normalized = " ".join(text.split()).strip()
@@ -1123,6 +1394,7 @@ class ListendService:
         self._dispatch(dispatch_text)
         # エージェント発話後のタイムスタンプを更新（ループ防止用）
         self.last_wake_ack_at = time.monotonic()
+        self.last_system_audio_at = self.last_wake_ack_at
 
     def _emit_chunk_debug(
         self,
@@ -1906,6 +2178,25 @@ def main() -> int:
             settings.reazon_precision,
         )
     logging.info("rtsp_transport=%s", settings.rtsp_transport)
+    logging.info(
+        (
+            "wake_backend=%s model=%s threshold=%.3f debounce_sec=%.2f "
+            "interval_sec=%.2f/%.2f warmup_sec=%.2f"
+        ),
+        settings.wake.backend,
+        settings.wake.model_path,
+        settings.wake.threshold,
+        settings.wake.debounce_sec,
+        settings.wake.active_interval_sec,
+        settings.wake.idle_interval_sec,
+        settings.wake.warmup_sec,
+    )
+    logging.info(
+        "wake_prompt=%s guard_sec=%.2f timeout_sec=%.2f",
+        settings.wake.prompt_audio_path,
+        settings.wake.prompt_guard_sec,
+        settings.wake.prompt_timeout_sec,
+    )
     logging.info("wake_words=%s", ",".join(settings.wake_words))
     logging.info("stop_words=%s", ",".join(settings.stop_words))
     logging.info(
@@ -1950,7 +2241,10 @@ def main() -> int:
         return 2
 
     install_signal_handlers(service)
-    return service.run()
+    try:
+        return service.run()
+    finally:
+        service.close()
 
 
 if __name__ == "__main__":
