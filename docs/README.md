@@ -5,6 +5,7 @@
 ## 構成
 
 - `docs/setup-manual.md`: 実運用向けセットアップ手順（systemd / Docker / .env / 動作確認）
+- `docs/semanticmemory-ruri-v3-migration.md`: 既存の記憶を保護したRuri v3移行・確認・復旧手順
 - `docs/plan/README.md`: 中期・長期計画、要件、設計、デプロイ方針
 - `docs/tasks/README.md`: 実装タスク管理と進捗追跡
 - `docs/phase_logs/README.md`: Phase単位の作業ログ
@@ -14,13 +15,14 @@
 ## まず読む順序
 
 1. `docs/setup-manual.md`
-2. `docs/plan/tapo-robot-requirements.md`
-3. `docs/plan/tapo-robot-thinking-order.md`
-4. `docs/plan/sbert-skill-router-spec.md`
-5. `docs/plan/sbert-skill-router-system-design.md`
-6. `docs/plan/tapo-robot-listend-system-design.md`
-7. `docs/plan/tapo-robot-listend-install.md`
-8. `docs/plan/tapo-robot-architecture.md`
-9. `docs/plan/tapo-robot-deployment.md`
-10. `docs/tasks/tapo-robot-backlog.md`
-11. `docs/considerations/open-issues.md`
+2. `docs/semanticmemory-ruri-v3-migration.md`（既存環境をRuri v3へ移行する場合）
+3. `docs/plan/tapo-robot-requirements.md`
+4. `docs/plan/tapo-robot-thinking-order.md`
+5. `docs/plan/sbert-skill-router-spec.md`
+6. `docs/plan/sbert-skill-router-system-design.md`
+7. `docs/plan/tapo-robot-listend-system-design.md`
+8. `docs/plan/tapo-robot-listend-install.md`
+9. `docs/plan/tapo-robot-architecture.md`
+10. `docs/plan/tapo-robot-deployment.md`
+11. `docs/tasks/tapo-robot-backlog.md`
+12. `docs/considerations/open-issues.md`

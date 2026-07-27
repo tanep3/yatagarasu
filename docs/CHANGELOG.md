@@ -24,6 +24,9 @@
 - SemanticMemoryの運用固有Compose設定を`deploy/semanticmemory.compose.override.yml`へ分離した
 - 埋め込みモデル移行を一時Chromaコレクションで検証後に切り替える方式へ変更した
 - Ruri v2とRuri v3の検索用接頭辞をモデル世代ごとに適用できるようにした
+- 新規SemanticMemory環境の既定埋め込みモデルをRuri v3に変更した
+- 既存環境を自動的にRuri v3へ切り替えず、v2を維持する互換方針を明記した
+- `docs/semanticmemory-ruri-v3-migration.md`にバックアップ、移行確認、v2への復旧手順を追加した
 
 ## V1.1.0 (2026-02-28)
 

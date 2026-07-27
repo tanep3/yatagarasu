@@ -35,6 +35,16 @@ SemanticMemoryはCPU専用PyTorchで動作します。Yatagarasu固有のCompose
 `deploy/semanticmemory.compose.override.yml`に分離し、submodule本体へ運用設定を
 書き込まない構成です。埋め込みモデル変更時は保存済みベクトルの再構築が必要です。
 
+### SemanticMemoryのRuri v3対応
+
+新規Docker環境では、SemanticMemoryの埋め込みモデルにRuri v3を使用します。
+既存の記憶を持つ環境ではRuri v2の設定を維持し、通常のアップデートだけで
+モデルや検索ベクトルが自動的に変更されることはありません。
+
+既存環境でRuri v3を利用する場合だけ、一度移行手順を実行します。詳しくは
+[SemanticMemory Ruri v3 移行ガイド](docs/semanticmemory-ruri-v3-migration.md)を
+参照してください。
+
 ## SBERT Skill Router
 
 `YATAGARASU_SBERT_ROUTER_ENABLED="true"` の場合、`listend.py` はLLMへ渡す前に短いIntent判定を行います。
