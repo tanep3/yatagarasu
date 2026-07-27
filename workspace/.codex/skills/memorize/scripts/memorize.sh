@@ -119,9 +119,14 @@ EOF
 fi
 
 # APIリクエスト
-RESPONSE=$(curl -s -X POST "${API_URL}/save" \
+if ! RESPONSE=$(curl --silent --show-error --fail-with-body \
+    --max-time "${SEMANTIC_MEMORY_TIMEOUT_SEC:-30}" \
+    -X POST "${API_URL}/save" \
     -H "Content-Type: application/json" \
-    -d "$JSON")
+    -d "$JSON"); then
+    echo "エラー: SemanticMemory API request failed" >&2
+    exit 1
+fi
 
 # エラーチェック
 if echo "$RESPONSE" | jq -e '.status == "saved"' >/dev/null 2>&1; then

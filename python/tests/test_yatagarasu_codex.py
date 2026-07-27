@@ -122,7 +122,41 @@ def test_memorize_skill_uses_valid_repository_script() -> None:
 
     assert ".codex/skills/memorize/scripts/memorize.sh" in skill
     assert "\nmemorize \"" not in skill
+    assert "保存ID" in skill
+    assert "保存に成功したと伝えてはいけません" in skill
     subprocess.run(["bash", "-n", str(script)], check=True)
+
+
+def test_memorize_script_surfaces_http_failures(tmp_path: Path) -> None:
+    fake_path = tmp_path / "fake-path"
+    fake_path.mkdir()
+    write_executable(
+        fake_path / "curl",
+        "#!/bin/bash\nprintf '{\"detail\":\"upstream failed\"}'\nexit 22\n",
+    )
+    script = (
+        PROJECT_ROOT
+        / "workspace"
+        / ".codex"
+        / "skills"
+        / "memorize"
+        / "scripts"
+        / "memorize.sh"
+    )
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_path}:{env['PATH']}"
+
+    result = subprocess.run(
+        [str(script), "phase 6B"],
+        cwd=PROJECT_ROOT / "workspace",
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "SemanticMemory API request failed" in result.stderr
+    assert "upstream failed" not in result.stdout
 
 
 def test_agent_instructions_name_executable_search_and_fetch_entries() -> None:
