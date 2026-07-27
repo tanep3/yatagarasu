@@ -11,26 +11,26 @@ SemanticMemory APIを使って情報を長期記憶として保存します。
 
 ```bash
 # 基本的な使い方
-memorize "ユーザーは猫を飼っている"
+.codex/skills/memorize/scripts/memorize.sh "ユーザーは猫を飼っている"
 
 # サブテキスト付き（追加情報）
-memorize "WiFiパスワードはhogehoge" --sub "自宅のWiFi"
+.codex/skills/memorize/scripts/memorize.sh "WiFiパスワードはhogehoge" --sub "自宅のWiFi"
 
 # 要約なし（そのまま保存）
-memorize "単純なメモ" --no-summarize
+.codex/skills/memorize/scripts/memorize.sh "単純なメモ" --no-summarize
 ```
 
 ## 使用例
 
 ```bash
 # ユーザー設定を記憶
-memorize "ユーザーの名前はたねちゃん"
+.codex/skills/memorize/scripts/memorize.sh "ユーザーの名前はたねちゃん"
 
 # 会話中の重要事項を記憶
-memorize "ユーザーはRustが好き"
+.codex/skills/memorize/scripts/memorize.sh "ユーザーはRustが好き"
 
 # 複雑な情報を記憶（要約付き）
-memorize "プロジェクトの設定ファイルは ~/dev/AI/yatagarasu/.env にある" --sub "環境設定"
+.codex/skills/memorize/scripts/memorize.sh "プロジェクトの設定ファイルは ~/dev/AI/yatagarasu/.env にある" --sub "環境設定"
 ```
 
 ## オプション

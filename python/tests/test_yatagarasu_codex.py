@@ -115,6 +115,16 @@ def test_recall_skill_uses_repository_executable_path() -> None:
     assert "\nrecall \"" not in skill
 
 
+def test_memorize_skill_uses_valid_repository_script() -> None:
+    skill_root = PROJECT_ROOT / "workspace" / ".codex" / "skills" / "memorize"
+    skill = (skill_root / "SKILL.md").read_text()
+    script = skill_root / "scripts" / "memorize.sh"
+
+    assert ".codex/skills/memorize/scripts/memorize.sh" in skill
+    assert "\nmemorize \"" not in skill
+    subprocess.run(["bash", "-n", str(script)], check=True)
+
+
 def test_agent_instructions_name_executable_search_and_fetch_entries() -> None:
     instructions = (PROJECT_ROOT / "workspace" / "AGENTS.md").read_text()
 
