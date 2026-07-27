@@ -19,6 +19,11 @@
 - `view` は `GO2RTC_FRAME_API_ENABLED=true` の場合にgo2rtc HTTP frame APIを優先し、画像取得を高速化した
 - `LISTEND_WAKE_ACK_WORD` の再生タイミングをLLM dispatch直前へ移動し、移動だけで完結するRouter処理では発話しないようにした
 - 画像翻訳Intentでは、翻訳だけを返すようLLM向けプロンプトを調整した
+- SemanticMemoryのPyTorchをCPU専用wheelへ固定し、CUDA/NVIDIA依存を除去した
+- SemanticMemoryのモデルキャッシュ保存先を永続volumeへ統一した
+- SemanticMemoryの運用固有Compose設定を`deploy/semanticmemory.compose.override.yml`へ分離した
+- 埋め込みモデル移行を一時Chromaコレクションで検証後に切り替える方式へ変更した
+- Ruri v2とRuri v3の検索用接頭辞をモデル世代ごとに適用できるようにした
 
 ## V1.1.0 (2026-02-28)
 

@@ -8,7 +8,8 @@
 
 ### 現状
 
-SemanticMemory は `sentence-transformers` 経由で `cl-nagoya/ruri-small-v2` を使用している。
+改修前のSemanticMemoryは`sentence-transformers`経由で
+`cl-nagoya/ruri-small-v2`を使用していた。
 
 ローカル確認結果:
 
@@ -16,7 +17,8 @@ SemanticMemory は `sentence-transformers` 経由で `cl-nagoya/ruri-small-v2` �
 - `external/SemanticMemory/src/chroma.py` は `SentenceTransformer(model_name, trust_remote_code=True)` でモデルをロードする
 - SemanticMemory コンテナ内では `torch 2.11.0+cu130` が入っているが、`torch.cuda.is_available()` は `False`
 
-つまり、現状の SemanticMemory は CPU で動いているが、依存としては CUDA 付き PyTorch を持っている。
+改修前はCPUで推論しているにもかかわらず、依存としてCUDA付きPyTorchを持っていた。
+現在はPyTorch公式CPU wheelを明示し、CUDA/NVIDIA依存を除外している。
 
 ### 候補比較
 
@@ -80,7 +82,13 @@ Router は SemanticMemory コンテナへ同居させず、Yatagarasu 側の独�
 SBERT Skill Router は `cl-nagoya/ruri-v3-70m` を第一候補にする。
 ただし、CPU負荷やインストールサイズが気になる場合は `cl-nagoya/ruri-v3-30m` を優先評価する。
 
-SemanticMemory は既存どおり `cl-nagoya/ruri-small-v2` のまま維持し、Router と記憶検索のモデル選定を分離する。
+SemanticMemory とRouterのモデル選定は分離する。SemanticMemoryを
+`cl-nagoya/ruri-v3-70m`へ更新する場合は、768次元のv2ベクトルを流用せず、
+SQLiteを正として384次元のベクトルを全件再構築する。
+
+再構築は一時Chromaコレクションで完了・整合性確認してから切り替える。
+Router側のベクトルは起動時にメモリ内生成されるため、SemanticMemoryの移行対象には
+含まれない。
 
 ## 2. Intent テンプレート管理
 

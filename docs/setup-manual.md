@@ -330,7 +330,8 @@ curl -s http://127.0.0.1:50021/version
 
 `SemanticMemory` は内部で要約時に `Ollama` を呼び出します。  
 このリポジトリの `external/SemanticMemory/docker-compose.yml` は
-`OLLAMA_URL=http://localhost:11434` を使うため、**ホスト側で Ollama を起動**しておく必要があります。
+`OLLAMA_URL=http://host.docker.internal:11434` を使うため、
+**ホスト側で Ollama を起動**しておく必要があります。
 
 導入（Linux）:
 
@@ -358,8 +359,33 @@ ollama pull hf.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF:Q8_0
 
 ```bash
 cd external/SemanticMemory
-docker compose up -d
+docker compose \
+  -f docker-compose.yml \
+  -f ../../deploy/semanticmemory.compose.override.yml \
+  up -d --build
 ```
+
+Yatagarasu固有のコンテナ名と運用時のソースマウントは
+`deploy/semanticmemory.compose.override.yml`に分離しています。
+SemanticMemory本体のCompose設定を直接編集しないため、submoduleを更新しても
+運用設定が未コミット変更として残りません。
+
+SemanticMemoryはCPU専用のPyTorch wheelを使用します。GPUを搭載していない環境で
+CUDA/NVIDIAパッケージを取得しないため、初回ビルド時間とイメージ容量を抑えられます。
+
+埋め込みモデルを変更する場合、`.env`の`SBERT_MODEL`だけを先に変更して再起動しては
+いけません。モデルごとにベクトル空間と次元数が異なるため、SQLiteを正として
+安全な再構築APIを実行します。
+
+```bash
+curl -fsS -X POST \
+  "http://127.0.0.1:6001/api/rebuild_vector?sbert_model=cl-nagoya/ruri-v3-70m"
+curl -fsS http://127.0.0.1:6001/api/check_integrity
+```
+
+再構築処理は一時コレクションを作成し、全件のID整合性を確認できた場合だけ
+新しいコレクションへ切り替えます。失敗時は従来のコレクションとモデル設定を
+維持します。
 
 疎通:
 

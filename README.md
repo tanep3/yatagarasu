@@ -31,6 +31,10 @@ Tapo見守りカメラ（TC70/C200/C220等）をロボット化するための�
   - `SemanticMemory`
   - `searxng`（`tanechan-search` 用）
 
+SemanticMemoryはCPU専用PyTorchで動作します。Yatagarasu固有のCompose設定は
+`deploy/semanticmemory.compose.override.yml`に分離し、submodule本体へ運用設定を
+書き込まない構成です。埋め込みモデル変更時は保存済みベクトルの再構築が必要です。
+
 ## SBERT Skill Router
 
 `YATAGARASU_SBERT_ROUTER_ENABLED="true"` の場合、`listend.py` はLLMへ渡す前に短いIntent判定を行います。
@@ -177,8 +181,8 @@ git pull --ff-only
 |---|---|---|---|
 | `Systran/faster-whisper-base` | `LISTEND_STT_BACKEND=faster-whisper` | MIT | https://huggingface.co/Systran/faster-whisper-base |
 | `reazon-research/reazonspeech-k2-v2` | `LISTEND_STT_BACKEND=reazonspeech-k2` | Apache-2.0 | https://huggingface.co/reazon-research/reazonspeech-k2-v2 |
-| `cl-nagoya/ruri-small-v2` | SemanticMemory埋め込み | Apache-2.0 + Gemma Terms（SemanticMemory README記載） | https://huggingface.co/cl-nagoya/ruri-small-v2 |
-| `cl-nagoya/ruri-v3-70m` | SBERT Skill Router | Apache-2.0 | https://huggingface.co/cl-nagoya/ruri-v3-70m |
+| `cl-nagoya/ruri-small-v2` | SemanticMemory埋め込み（移行前） | Apache-2.0 | https://huggingface.co/cl-nagoya/ruri-small-v2 |
+| `cl-nagoya/ruri-v3-70m` | SBERT Skill Router / SemanticMemory移行候補 | Apache-2.0 | https://huggingface.co/cl-nagoya/ruri-v3-70m |
 | `SakanaAI/TinySwallow-1.5B-Instruct-GGUF` | SemanticMemory要約 | Apache-2.0 + Gemma Terms（SemanticMemory README記載） | https://huggingface.co/SakanaAI/TinySwallow-1.5B-Instruct-GGUF |
 
 補足:

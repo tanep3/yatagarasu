@@ -1,0 +1,5 @@
+services:
+  semanticmemory:
+    container_name: semanticmemory_yatagarasu
+    volumes:
+      - ./src:/app/src:ro
