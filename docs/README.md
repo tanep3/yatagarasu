@@ -17,12 +17,13 @@
 1. `docs/setup-manual.md`
 2. `docs/semanticmemory-ruri-v3-migration.md`（既存環境をRuri v3へ移行する場合）
 3. `docs/plan/tapo-robot-requirements.md`
-4. `docs/plan/tapo-robot-thinking-order.md`
-5. `docs/plan/sbert-skill-router-spec.md`
-6. `docs/plan/sbert-skill-router-system-design.md`
-7. `docs/plan/tapo-robot-listend-system-design.md`
-8. `docs/plan/tapo-robot-listend-install.md`
-9. `docs/plan/tapo-robot-architecture.md`
-10. `docs/plan/tapo-robot-deployment.md`
-11. `docs/tasks/tapo-robot-backlog.md`
-12. `docs/considerations/open-issues.md`
+4. `docs/plan/livekit-wakeword-requirements.md`
+5. `docs/plan/tapo-robot-thinking-order.md`
+6. `docs/plan/sbert-skill-router-spec.md`
+7. `docs/plan/sbert-skill-router-system-design.md`
+8. `docs/plan/tapo-robot-listend-system-design.md`
+9. `docs/plan/tapo-robot-listend-install.md`
+10. `docs/plan/tapo-robot-architecture.md`
+11. `docs/plan/tapo-robot-deployment.md`
+12. `docs/tasks/tapo-robot-backlog.md`
+13. `docs/considerations/open-issues.md`
