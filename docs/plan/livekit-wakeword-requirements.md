@@ -72,6 +72,7 @@
   - `hai.mp3`
 - 配布時の格納先:
   - `assets/audio/wake_prompt_hai.mp3`
+  - 実行用低遅延版: `assets/audio/wake_prompt_hai.wav`
 - SHA-256:
   - `5039cd6f77dd7d57db65edefac5b2f56356f4f4a3c04a6ef9d42fd16c2d13257`
 - 音声仕様:
@@ -79,6 +80,7 @@
   - 8kHz
   - mono
   - 約1.01秒
+  - 実行用WAVは先頭・末尾無音を除いたPCM 16-bit、約0.28秒
 - 配布時のファイルmode: `0644`
 - 必須クレジット:
   - `VOICEVOX:青山龍星`
@@ -90,7 +92,7 @@
 - ONNXウェイクワード検出器の追加
 - RTSP音声のローリングバッファ管理
 - OFF / WAKING / ON状態遷移
-- 同梱MP3による即時フィードバック
+- 同梱の低遅延PCM WAVによる即時フィードバック
 - フィードバック音声の回り込み抑制
 - 命令音声のVAD、無音確定、STT連携
 - STTウェイク方式への明示的切替
@@ -155,7 +157,7 @@ Yatagarasu: カメラを右へ移動
 - 現在のVADセグメントとSTT対象バッファを破棄する。
 - ONNXローリングバッファを初期化する。
 - `WAKING`へ遷移する。
-- 同梱MP3を`tapovoice`経由で再生する。
+- 同梱MP3から生成した低遅延PCM WAVを`tapovoice`経由で再生する。
 - 再生開始処理に失敗しても、警告ログを出して命令待機へ進む。
 
 ### 6.4 命令待機
@@ -216,7 +218,7 @@ LISTEND_WAKE_BACKEND="livekit"
 LISTEND_WAKE_MODEL_PATH=""
 LISTEND_WAKE_THRESHOLD="0.6"
 LISTEND_WAKE_DEBOUNCE_SEC="2.0"
-LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.16"
+LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.08"
 LISTEND_WAKE_IDLE_INTERVAL_SEC="1.5"
 LISTEND_WAKE_SPEECH_HOLD_SEC="2.0"
 LISTEND_WAKE_WARMUP_SEC="0.0"
@@ -224,7 +226,7 @@ LISTEND_WAKE_WARMUP_SEC="0.0"
 # 空なら同梱の青山龍星「はい」MP3を使用
 LISTEND_WAKE_PROMPT_AUDIO=""
 LISTEND_WAKE_PROMPT_WORD="はい"
-LISTEND_WAKE_PROMPT_GUARD_SEC="0.8"
+LISTEND_WAKE_PROMPT_GUARD_SEC="0.6"
 LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
 
 # STT backend時の文字列ウェイク、および表示・ログ用
@@ -279,7 +281,7 @@ SPEAKER_ID="13"
 - ONNX推論がRTSP音声読込、VAD、STTをブロックしないこと。
 - ONNXモデルの入力窓は常に2秒分とし、短い入力を直接渡さないこと。
 - 標準設定では、起動・reset後の最初の音声チャンクから推論可能であること。
-- 待機中は1.5秒間隔、発話中は160ms間隔を初期値とし、常時80ms間隔では推論しないこと。
+- 待機中は1.5秒間隔、発話中は80ms間隔を初期値とし、無音時に80ms間隔では推論しないこと。
 - 第8世代Core i7で60秒のウォームアップ後、5分間の無音待機を測定し、
   ONNXウェイク導入による`listend`の追加CPU使用率を平均5 percentage points以下とすることを
   性能目標とする。
@@ -401,7 +403,7 @@ VOICEVOX:青山龍星
 
 - `workspace/.env.example`の`SPEAKER_ID`が`13`である。
 - 新規標準設定の通常応答が青山龍星で再生される。
-- ウェイク即時フィードバックは、話者設定にかかわらず同梱MP3を使用する。
+- ウェイク即時フィードバックは、話者設定にかかわらず同梱の低遅延WAVを使用する。
 
 ### AC-08 配布
 
@@ -473,10 +475,10 @@ Yatagarasuでは既存のRTSP入力とSilero VADを利用し、音声取得経�
   - 参考テストに合わせた初期候補は`0.6`。
   - 正例・生活音・テレビ音声でscore分布を確認して決定する。
 - `LISTEND_WAKE_PROMPT_GUARD_SEC`
-  - 初期候補は`0.8`秒。
+  - 実機調整後の初期値は`0.6`秒。
   - Tapo実機で「はい」の聞こえ終わりと命令録音開始を確認して決定する。
 - ONNX推論間隔
-  - 初期候補は発話中160ms、待機中1秒、発話保持2秒。
+  - 実機調整後の初期値は発話中80ms、待機中1.5秒、発話保持2秒。
   - 第8世代Core i7でCPU使用率、検出率、検出遅延を測定して決定する。
 
 ## 17. 将来拡張

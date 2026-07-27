@@ -328,7 +328,7 @@ class ListendSettings:
 
         active_interval_sec = env_float_strict(
             "LISTEND_WAKE_ACTIVE_INTERVAL_SEC",
-            0.16,
+            0.08,
             minimum=0.0,
             minimum_inclusive=False,
         )
@@ -373,11 +373,11 @@ class ListendSettings:
             ),
             prompt_audio_path=resolve_wake_path(
                 "LISTEND_WAKE_PROMPT_AUDIO",
-                workspace_path.parent / "assets" / "audio" / "wake_prompt_hai.mp3",
+                workspace_path.parent / "assets" / "audio" / "wake_prompt_hai.wav",
             ),
             prompt_guard_sec=env_float_strict(
                 "LISTEND_WAKE_PROMPT_GUARD_SEC",
-                0.8,
+                0.6,
                 minimum=0.0,
             ),
             prompt_timeout_sec=env_float_strict(

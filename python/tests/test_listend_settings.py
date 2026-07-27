@@ -38,7 +38,7 @@ def configure_minimal_env(monkeypatch, tmp_path: Path) -> Path:
     )
     monkeypatch.setenv(
         "LISTEND_WAKE_PROMPT_AUDIO",
-        str(project_root / "assets" / "audio" / "wake_prompt_hai.mp3"),
+        str(project_root / "assets" / "audio" / "wake_prompt_hai.wav"),
     )
     return workspace
 
@@ -49,7 +49,9 @@ def test_livekit_is_default_backend(monkeypatch, tmp_path: Path) -> None:
     settings = ListendSettings.from_env()
 
     assert settings.wake.backend == "livekit"
+    assert settings.wake.active_interval_sec == 0.08
     assert settings.wake.warmup_sec == 0.0
+    assert settings.wake.prompt_guard_sec == 0.6
     assert settings.wake.prompt_timeout_sec == 2.0
     assert settings.silence_timeout_sec == 3.0
     assert settings.wake_ack_speaker_id == "13"

@@ -12,6 +12,8 @@
 - `yatagarasu doctor`へONNX shape、SHA-256、CPU Provider、smoke inference、
   prompt音声の診断を追加
 - 新規標準話者をVOICEVOX 青山龍星（`SPEAKER_ID="13"`）へ変更
+- 発話中のウェイク推論を80ms間隔へ高速化し、先頭無音を除いたPCM WAV版の
+  「はい」を標準利用することでウェイク応答遅延を短縮
 - `bin/yatagarasu` が Codex CLI / Claude Code / opencode を選択実行できるようになった
   - `YATAGARASU_ENGINE`
   - `YATAGARASU_CODEX_MODEL`

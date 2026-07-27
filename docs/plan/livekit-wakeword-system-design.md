@@ -63,11 +63,11 @@ dispatch完了後に無活動タイマーをリセットする。
 LiveKitの`WakeWordModel.predict()`はstatelessであり、呼び出しごとに約2秒の
 音声窓全体からmel spectrogramとspeech embeddingを再計算する。
 
-80msごとの実行は行わず、Silero VADに連動した推論間隔を採用する。
+Silero VADに連動した推論間隔を採用し、80ms実行は発話中だけに限定する。
 
 - 発話開始時: 即時要求
-- 発話中: 160ms間隔
-- 待機中: 1秒間隔
+- 発話中: 80ms間隔
+- 待機中: 1.5秒間隔
 - 発話検出後: 2秒間は発話中intervalを維持
 
 上流実装:
@@ -474,7 +474,7 @@ STT backend:
 ### 11.3 WAKING
 
 1. state entryでsegment bufferとONNX AudioWindowをzero reset
-2. 同梱MP3をprompt playerへ渡す
+2. 同梱の低遅延PCM WAVをprompt playerへ渡す
 3. `prompt_timeout_deadline = now + prompt_timeout_sec`
 4. RTSP音声は読み続ける
 5. PCMは命令segmentにもONNX AudioWindowにも追加しない
@@ -609,12 +609,12 @@ class WakeSettings:
 | `LISTEND_WAKE_MODEL_PATH` | path | 同梱ONNX | readable file |
 | `LISTEND_WAKE_THRESHOLD` | float | `0.6` | `0.0 < value <= 1.0` |
 | `LISTEND_WAKE_DEBOUNCE_SEC` | float | `2.0` | `>= 0` |
-| `LISTEND_WAKE_ACTIVE_INTERVAL_SEC` | float | `0.16` | `> 0` |
+| `LISTEND_WAKE_ACTIVE_INTERVAL_SEC` | float | `0.08` | `> 0` |
 | `LISTEND_WAKE_IDLE_INTERVAL_SEC` | float | `1.5` | active以上 |
 | `LISTEND_WAKE_SPEECH_HOLD_SEC` | float | `2.0` | `>= 0` |
 | `LISTEND_WAKE_WARMUP_SEC` | float | `0.0` | `0.0 <= value <= 2.0` |
-| `LISTEND_WAKE_PROMPT_AUDIO` | path | 同梱MP3 | readable file |
-| `LISTEND_WAKE_PROMPT_GUARD_SEC` | float | `0.8` | `>= 0` |
+| `LISTEND_WAKE_PROMPT_AUDIO` | path | 同梱の低遅延WAV | readable file |
+| `LISTEND_WAKE_PROMPT_GUARD_SEC` | float | `0.6` | `>= 0` |
 | `LISTEND_WAKE_PROMPT_TIMEOUT_SEC` | float | `2.0` | `> 0` |
 | `LISTEND_SESSION_END_SILENCE_SEC` | float | `3.0` | `> 0` |
 | `LISTEND_SILENCE_TIMEOUT_SEC` | float | `3.0` | `> 0` |
@@ -627,7 +627,7 @@ LiveKit backend選択時は`LISTEND_SAMPLE_RATE=16000`かつ
 
 - 空文字:
   - model: `<project_root>/models/wakeword/nee_yatagarasu.onnx`
-  - prompt: `<project_root>/assets/audio/wake_prompt_hai.mp3`
+  - prompt: `<project_root>/assets/audio/wake_prompt_hai.wav`
 - 絶対path: そのまま使用
 - 相対path: `YATAGARASU_CWD`から解決
 
@@ -671,6 +671,7 @@ STT backendではmodelとpromptの存在を起動必須条件にしない。
 |---|---|---:|
 | 提供済み`nee_yatagarasu.onnx` | `models/wakeword/nee_yatagarasu.onnx` | `0644` |
 | 提供済み`hai.mp3` | `assets/audio/wake_prompt_hai.mp3` | `0644` |
+| 低遅延実行用WAV | `assets/audio/wake_prompt_hai.wav` | `0644` |
 
 asset READMEへhash、用途、来歴、クレジットを記録する。
 ONNXモデルについては、作成者を`Tane Channel Technology`とし、
@@ -805,9 +806,9 @@ doctorは音声を実際にカメラへ再生しない。
 - warmup 0.0秒では最初の実音声チャンクから推論できる
 - warmup 1.0秒と2.0秒では必要な実音声sample数まで推論しない
 - warmup設定にかかわらずmodel入力が常に32000 samplesになる
-- 無音時は1秒間隔
+- 無音時は設定された待機間隔
 - 発話開始時は即時要求
-- 発話中は160ms間隔
+- 発話中は設定されたactive interval
 - 発話終了後2秒はactive interval
 - worker実行中のpendingが最新要求へ置換される
 - drop countが増える
@@ -947,11 +948,11 @@ fake clockを使用し、実時間sleepを使わない。
 実装開始値:
 
 - threshold: `0.6`
-- active interval: `0.16`
+- active interval: `0.08`
 - idle interval: `1.5`
 - speech hold: `2.0`
 - warmup: `0.0`
-- prompt guard: `0.8`
+- prompt guard: `0.6`
 - prompt timeout: `2.0`
 - session end silence: `3.0`
 - session timeout: `3.0`
