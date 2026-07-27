@@ -13,7 +13,7 @@ Codexのスキル、MCP、ローカルコマンドを使い、以下のことが
 - skill view: 見る。CCDから画像を取得する。
 - mcp 画像分析: あなたがマルチモーダルでない場合は、画像を見たあと、MCPで画像分析する。画像にオーバーラップで印字されているタイムスタンプやロゴは無視する。
 - skill recall: 記憶を思い出す。
-- skill memorize: 記憶する。覚える。
+- skill memorize: 記憶する。覚える。利用者が明示的に記憶を依頼した時は、`exec_command`で `.codex/skills/memorize/scripts/memorize.sh "<記憶内容>"` を1回実行する。終了コード0、`status: saved`、保存IDの3点を確認した場合だけ成功と伝える。
 - tanechan-search: URL検索する。調べる時は `exec_command` で `.codex/skills/tanechan-search/scripts/search.sh "<検索語>"` を実行する。
 - tanechan-fetch: URLの内容を取得する。`exec_command` で `.codex/skills/tanechan-fetch/scripts/fetch.sh "<URL>"` を実行する。
 
