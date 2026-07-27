@@ -5,21 +5,25 @@
 
 # スクリプトのディレクトリを取得
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # 呼び出し元のワーキングディレクトリを保存（再帰呼び出し用）
-export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
+if [[ "${1:-}" == "doctor" && -z "${YATAGARASU_CWD:-}" ]]; then
+    export YATAGARASU_CWD="$PROJECT_ROOT/workspace"
+else
+    export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
+fi
 
 # .envファイルから環境変数を読み込む
 load_env_file() {
-    local project_root="$(dirname "$SCRIPT_DIR")"
-    local workspace="${YATAGARASU_CWD:-$project_root/workspace}"
+    local workspace="${YATAGARASU_CWD:-$PROJECT_ROOT/workspace}"
     local env_file=""
 
     # workspace/.envを優先、なければプロジェクトルートの.env
     if [[ -f "${workspace}/.env" ]]; then
         env_file="${workspace}/.env"
-    elif [[ -f "${project_root}/.env" ]]; then
-        env_file="${project_root}/.env"
+    elif [[ -f "${PROJECT_ROOT}/.env" ]]; then
+        env_file="${PROJECT_ROOT}/.env"
     fi
 
     if [[ -f "${env_file}" ]]; then
@@ -34,6 +38,13 @@ load_env_file() {
 
 load_env_file
 
+# User-installed tools such as uv must remain available to Codex tool calls
+# even when Yatagarasu is started by systemd or a non-interactive shell.
+USER_LOCAL_BIN="${HOME:-}/.local/bin"
+if [[ -d "$USER_LOCAL_BIN" && ":$PATH:" != *":$USER_LOCAL_BIN:"* ]]; then
+    export PATH="$USER_LOCAL_BIN:$PATH"
+fi
+
 if [[ "${1:-}" == "doctor" ]]; then
     shift
     exec "$SCRIPT_DIR/yatagarasu-doctor" "$@"
@@ -43,8 +54,9 @@ fi
 ENGINE="${YATAGARASU_ENGINE:-auto}"
 MODEL="${YATAGARASU_MODEL:-}"
 CODEX_MODEL="${YATAGARASU_CODEX_MODEL:-}"
+CODEX_PROFILE="${YATAGARASU_CODEX_PROFILE:-}"
 CODEX_REASONING_EFFORT="${YATAGARASU_CODEX_REASONING_EFFORT:-}"
-CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-true}"
+CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-false}"
 SPEAKER="${SPEAKER_ID:-68}"
 # SemanticMemory設定
 MEMORY_ENABLED="${YATAGARASU_MEMORY_ENABLED:-true}"
@@ -82,8 +94,9 @@ usage() {
     echo "  YATAGARASU_ENGINE            実行エンジン (auto/codex/claude/opencode)" >&2
     echo "  YATAGARASU_MODEL             エンジンに渡すモデル名" >&2
     echo "  YATAGARASU_CODEX_MODEL       Codex CLI用モデル名 (YATAGARASU_MODELより優先)" >&2
+    echo "  YATAGARASU_CODEX_PROFILE     Codex CLI設定Profile名 (例: yatagarasu-local)" >&2
     echo "  YATAGARASU_CODEX_REASONING_EFFORT Codex CLI推論強度 (low/medium/high/xhigh)" >&2
-    echo "  YATAGARASU_CODEX_BYPASS_SANDBOX Codexの承認・サンドボックスをバイパス (デフォルト: true)" >&2
+    echo "  YATAGARASU_CODEX_BYPASS_SANDBOX Codexの承認・サンドボックスをバイパス (デフォルト: false)" >&2
     echo "  YATAGARASU_MEMORY_ENABLED    記憶機能の有効/無効 (デフォルト: true)" >&2
     echo "  SEMANTIC_MEMORY_RECENT_LIMIT 過去の文脈取得件数 (デフォルト: 3)" >&2
     echo "  SEMANTIC_MEMORY_RECALL_LIMIT 関連知識取得件数 (デフォルト: 3)" >&2
@@ -283,6 +296,10 @@ run_codex() {
     fi
 
     codex_args=(exec -C "$YATAGARASU_CWD" "${sandbox_args[@]}" --color never)
+
+    if [[ -n "$CODEX_PROFILE" ]]; then
+        codex_args+=(--profile "$CODEX_PROFILE")
+    fi
 
     if [[ -n "$CODEX_REASONING_EFFORT" ]]; then
         case "$CODEX_REASONING_EFFORT" in

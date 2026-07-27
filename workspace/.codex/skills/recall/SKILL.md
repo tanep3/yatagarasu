@@ -10,27 +10,29 @@ SemanticMemory APIから過去の記憶を検索・想起します。
 ## Quick Start
 
 ```bash
+RECALL_SCRIPT=".codex/skills/recall/scripts/recall.sh"
+
 # 基本的な使い方
-recall "猫について"
+$RECALL_SCRIPT "猫について"
 
 # 取得件数を指定
-recall "WiFi" --limit 5
+$RECALL_SCRIPT "WiFi" --limit 5
 
 # 類似度閾値を調整
-recall "プロジェクト" --threshold 0.6
+$RECALL_SCRIPT "プロジェクト" --threshold 0.6
 ```
 
 ## 使用例
 
 ```bash
 # ユーザー情報を思い出す
-recall "たねちゃん"
+.codex/skills/recall/scripts/recall.sh "たねちゃん"
 
 # 過去の設定を思い出す
-recall "環境設定"
+.codex/skills/recall/scripts/recall.sh "環境設定"
 
 # 複数の記憶を取得
-recall "Rust" --limit 10 --threshold 0.5
+.codex/skills/recall/scripts/recall.sh "Rust" --limit 10 --threshold 0.5
 ```
 
 ## オプション

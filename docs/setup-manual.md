@@ -59,6 +59,68 @@ codex --version
 codex exec "hello"
 ```
 
+HoshikageをCodexの推論Providerとして使う場合、Codex CLIの導入だけでは接続されません。次の三つをYatagarasu側で指定します。
+
+1. Hoshikage Providerを記述したCodex Profile
+2. Hoshikageで利用するModel Bundle名
+3. LAN認証用Token
+
+Hoshikage server machineで用途名付きTokenと対話用Profileを生成します。
+
+```bash
+hoshikage token create yatagarasu
+hoshikage token list
+hoshikage codex-config \
+  --model unsloth-gemma4-12b-qat-thinking-off \
+  --mode interactive \
+  --base-url http://<HOSHIKAGE_LAN_IP>:3030/v1 \
+  --authenticated
+```
+
+最後のコマンドが出力したTOMLを、Yatagarasuを動かすユーザーの`$CODEX_HOME/yatagarasu-local.config.toml`へ配置します。`CODEX_HOME`未設定時は通常`~/.codex`です。Hoshikageは利用者のCodex設定を自動変更しません。
+
+生成結果の`[sandbox_workspace_write] network_access = true`は削除しないでください。Codex sandbox内のSearch、Fetch、RecallなどがLAN・Internetへ接続するために必要で、Doctorもこの設定を検証します。
+
+次に、Git管理外の`workspace/.env`へ設定します。
+
+```bash
+YATAGARASU_ENGINE="codex"
+YATAGARASU_CODEX_PROFILE="yatagarasu-local"
+YATAGARASU_CODEX_MODEL="unsloth-gemma4-12b-qat-thinking-off"
+HOSHIKAGE_API_KEY="<hoshikage token listで確認したToken>"
+YATAGARASU_CODEX_BYPASS_SANDBOX="false"
+```
+
+`HOSHIKAGE_API_KEY`はLAN上のHoshikageへ接続するクライアントを識別するBearer Tokenです。server machineのToken保存ファイルをYatagarasuから直接参照せず、Token本文だけを`workspace/.env`からCodex子プロセスへ渡します。TokenをGit、Profile、コマンド履歴、ログへ残さないでください。
+
+接続診断:
+
+```bash
+bin/yatagarasu doctor --no-services --no-logs
+```
+
+DoctorはProfileの存在、Provider、モデル、`wire_api`、Token設定、認証付き`/ready`を順番に確認します。Token本文は表示しません。
+
+既に`yatagarasu.service`が稼働している状態で`workspace/.env`のProvider、モデル、Token、sandbox設定を変更した場合は、長時間稼働中の音声processへ再読込させます。
+
+```bash
+systemctl --user restart yatagarasu.service
+systemctl --user is-active yatagarasu.service
+```
+
+`.env`を更新しても再起動しなければ、音声dispatchだけが更新前のモデルや実行条件を使い続ける場合があります。
+
+対話確認:
+
+```bash
+cd workspace
+../bin/yatagarasu --engine codex "Return exactly OK."
+```
+
+対話利用では`YATAGARASU_CODEX_BYPASS_SANDBOX="false"`を維持します。`true`は承認とsandboxを完全に無効化するため、Phase 6Bの無人実行設計に従う場合以外は使用しません。
+
+`yatagarasu.service`は`YATAGARASU_CWD`を`workspace`へ固定します。手動実行でもSkillを自動検出させるため、上記のように`workspace`から起動するか、`YATAGARASU_CWD`を明示してください。
+
 Claude Codeを使う場合の確認:
 
 ```bash

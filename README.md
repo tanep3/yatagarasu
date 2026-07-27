@@ -65,14 +65,33 @@ GO2RTC_FRAME_API_ENABLED="true"
 YATAGARASU_ENGINE="auto"    # auto / codex / claude / opencode
 YATAGARASU_MODEL=""         # Codexでは空ならCodex CLI設定を使用
 YATAGARASU_CODEX_MODEL=""   # Codex専用モデル指定
+YATAGARASU_CODEX_PROFILE="" # Codex Profile名
 YATAGARASU_CODEX_REASONING_EFFORT="" # low / medium / high / xhigh
+YATAGARASU_CODEX_BYPASS_SANDBOX="false" # 対話利用の安全な既定値
 ```
+
+HoshikageをCodexのローカル推論Providerとして使う場合は、Hoshikageが生成した対話用Profileを`$CODEX_HOME/<profile>.config.toml`へ配置し、`workspace/.env`でProfile、モデル、Tokenを選びます。
+
+```bash
+YATAGARASU_ENGINE="codex"
+YATAGARASU_CODEX_PROFILE="yatagarasu-local"
+YATAGARASU_CODEX_MODEL="unsloth-gemma4-12b-qat-thinking-off"
+HOSHIKAGE_API_KEY="<hoshikage token listで確認したToken>"
+YATAGARASU_CODEX_BYPASS_SANDBOX="false"
+```
+
+`HOSHIKAGE_API_KEY`はLAN認証用の秘密情報です。ProfileやGit管理ファイルへ書かず、Git管理外の`workspace/.env`からCodex子プロセスへ渡します。設定後は`bin/yatagarasu doctor --no-services --no-logs`でProfile、Token設定、Hoshikage readinessを確認できます。
+
+Search、Fetch、RecallなどをCodex sandbox内で実行するため、Hoshikageが生成するProfileには`[sandbox_workspace_write] network_access = true`が含まれます。Doctorはこの設定も検証します。手動確認でSkillを使う場合は`workspace`を作業directoryにします。
+
+稼働中に`workspace/.env`を変更した場合は、`systemctl --user restart yatagarasu.service`で音声serviceへ新設定を読み込ませます。
 
 確認コマンド:
 
 ```bash
 codex --version
-codex exec "hello"
+cd workspace
+codex exec --profile yatagarasu-local "Return exactly OK."
 ```
 
 Claude Codeを使う場合:
