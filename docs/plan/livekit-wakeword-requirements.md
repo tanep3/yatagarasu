@@ -1,4 +1,4 @@
-# LiveKit WakeWord対応 要件定義 v0.2
+# LiveKit WakeWord対応 要件定義 v0.3
 
 - 作成日: 2026-07-27
 - 対象: `python/listend.py` のウェイクワード検出
@@ -28,7 +28,8 @@
 - CPUのみの環境で常時運用できる。
 - 従来のSTTウェイク方式を明示的な互換バックエンドとして残す。
 - 標準設定とコード上の既定バックエンドをONNX方式とし、`.env`でSTT方式へ切り替えられる。
-- 第8世代Core i7のCPUのみの環境で、待機時の追加CPU使用率を平均5%以下に抑える。
+- 第8世代Core i7のCPUのみの環境で、待機時の追加CPU使用率を平均5%以下に抑えることを
+  性能目標とする。
 - Yatagarasuの標準話者をVOICEVOXの青山龍星へ変更する。
 
 ## 3. 採用コンポーネント
@@ -59,6 +60,9 @@
   - 入力: `embeddings` / `[batch, 16, 96]` / `float32`
   - 出力: `score` / `[batch, 1]` / `float32`
 - 配布時のファイルmode: `0644`
+- 作成者: `Tane Channel Technology`
+- 学習方法: LiveKit WakeWordのVoxCPM公式設定、録音音声の追加なし
+- 配布ライセンス: Apache License 2.0
 
 ### 3.3 ウェイク即時フィードバック音声
 
@@ -183,6 +187,12 @@ dispatch後も`ON`を維持する場合は、dispatch完了時にセッション
 - 入力は既存のgo2rtc RTSP音声を使用する。
 - ffmpeg出力は16kHz、mono、signed 16-bit PCMとする。
 - ONNX推論用に直近約2秒の音声を保持する。
+- モデルへ渡す音声窓は、分類器が必要とする16 embeddingsを生成できる
+  32000 samplesで固定する。
+- 起動・reset直後に不足する過去音声は内部的な無音sampleで補い、
+  2秒間の検出不能時間を発生させない。
+- 実音声を何秒蓄積してから推論を許可するかは
+  `LISTEND_WAKE_WARMUP_SEC`で0.0秒から2.0秒まで調整可能にする。
 - 基本フレームは既存の80msチャンクとする。
 - RTSPから受け取った全フレームを、推論間隔にかかわらずローリングバッファへ追加する。
 - 既存のSilero VAD結果を再利用し、発話中と待機中でONNX推論間隔を切り替える。
@@ -209,11 +219,13 @@ LISTEND_WAKE_DEBOUNCE_SEC="2.0"
 LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.16"
 LISTEND_WAKE_IDLE_INTERVAL_SEC="1.0"
 LISTEND_WAKE_SPEECH_HOLD_SEC="2.0"
+LISTEND_WAKE_WARMUP_SEC="0.0"
 
 # 空なら同梱の青山龍星「はい」MP3を使用
 LISTEND_WAKE_PROMPT_AUDIO=""
 LISTEND_WAKE_PROMPT_WORD="はい"
 LISTEND_WAKE_PROMPT_GUARD_SEC="0.8"
+LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
 
 # STT backend時の文字列ウェイク、および表示・ログ用
 LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス"
@@ -265,13 +277,18 @@ SPEAKER_ID="13"
 
 - OFF状態のONNX推論はCPUのみで実行できること。
 - ONNX推論がRTSP音声読込、VAD、STTをブロックしないこと。
+- ONNXモデルの入力窓は常に2秒分とし、短い入力を直接渡さないこと。
+- 標準設定では、起動・reset後の最初の音声チャンクから推論可能であること。
 - 待機中は1秒間隔、発話中は160ms間隔を初期値とし、常時80ms間隔では推論しないこと。
 - 第8世代Core i7で60秒のウォームアップ後、5分間の無音待機を測定し、
-  ONNXウェイク導入による`listend`の追加CPU使用率を平均5 percentage points以下とする。
+  ONNXウェイク導入による`listend`の追加CPU使用率を平均5 percentage points以下とすることを
+  性能目標とする。
 - CPU使用率は、1論理CPUを100%とするLinuxのプロセスCPU指標で測定する。
 - 追加CPU使用率は、同じRTSP入力、チャンク長、Silero VAD設定で
   ONNX推論を無効にした基準値との差分として算出する。
 - 発話中の一時的な5%超過は許容するが、1論理CPUへ継続的に張り付かないこと。
+- 精度要件を満たしたまま性能目標を達成できない場合は、測定結果と調整案を提示し、
+  目標緩和や追加最適化をプロジェクト所有者へ相談する。無断で精度または目標を緩和しない。
 - ウェイク検出イベントからMP3再生要求開始まで、ローカル処理を200ms以内とする。
 - Tapo/go2rtcネットワーク区間の実再生遅延は、上記200msの測定対象外とする。
 - OFF状態では、ウェイク検出前にfaster-whisperまたはReazonSpeechを実行しないこと。
@@ -287,6 +304,7 @@ SPEAKER_ID="13"
 - ウェイク検出score
 - `OFF -> WAKING -> ON`遷移理由
 - フィードバック再生成否
+- prompt送信timeout
 - prompt guard開始・終了
 - 推論worker異常
 
@@ -331,6 +349,12 @@ VOICEVOX:青山龍星
 - LiveKit WakeWordをREADMEの第三者ソフトウェア一覧へ追加する。
 - `models/wakeword/README.md`へカスタムモデルの対象フレーズ、入出力shape、
   SHA-256、作成者・配布許諾に関する来歴を記載する。
+- カスタムモデルの作成者名は`Tane Channel Technology`に統一する。
+- カスタムモデルは、LiveKit WakeWordのVoxCPM公式設定を使用し、
+  録音音声を追加せず合成データから学習したものとして記録する。
+- カスタムモデルには、作成者の意思によりApache License 2.0を適用する。
+- 学習基盤であるLiveKit WakeWordとVoxCPMがApache License 2.0であることを
+  モデルの来歴文書に記載する。
 
 ## 13. 受け入れ条件
 
@@ -361,9 +385,12 @@ VOICEVOX:青山龍星
 - ウェイク前の通常発話でSTTが呼ばれない。
 - 推論が遅延してもRTSP音声読込が継続する。
 - 推論要求は実行中1件と保留中1件を超えない。
-- 5分間の無音待機で、ONNXウェイクによる追加CPU使用率が平均5 percentage points以下である。
+- 5分間の無音待機で、ONNXウェイクによる追加CPU使用率が平均5 percentage points以下を
+  目標とする。
 - 発話中もCPUが1論理CPUへ継続的に張り付かない。
 - CPU試験結果には、基準値、ONNX有効時、差分、推論回数、測定時間を記録する。
+- 5 percentage pointsを超えた場合は、検出品質を落として合格扱いにせず、
+  測定結果をもとにプロジェクト所有者と対応を決定する。
 
 ### AC-06 互換バックエンド
 
@@ -385,7 +412,9 @@ VOICEVOX:青山龍星
 
 ### AC-09 検出品質
 
-- 実機の通常利用距離で「ねぇ、ヤタガラス」を30回発話し、27回以上検出する。
+- 実機から1mの距離で、2人以上が「ねぇ、ヤタガラス」を合計30回発話し、
+  27回以上検出する。
+- 試験回数は話者間で大きく偏らせず、話者ごとの回数と検出数を記録する。
 - テレビ音声と通常の生活音を含む8時間の待機試験で、誤検出を1回以下とする。
 - 閾値決定時は正例の検出率と誤検出率を両方記録する。
 
@@ -403,7 +432,8 @@ VOICEVOX:青山龍星
 
 ## 14. テスト観点
 
-- 本人の通常速度、早口、小声、離れた位置からのウェイク
+- 1mの距離で、2人以上による通常速度、早口、小声のウェイク
+- `LISTEND_WAKE_WARMUP_SEC`を0.0、1.0、2.0秒へ変えた場合の検出率と初回検出遅延
 - 「ねえ」「ねぇ」の発音差
 - テレビ、人声、環境音による誤検出
 - ウェイク直後に命令を話し始めた場合の仕様どおりの扱い

@@ -6,6 +6,7 @@
 
 - `docs/plan/tapo-robot-requirements.md`: 要件定義（機能・非機能・受け入れ条件）
 - `docs/plan/livekit-wakeword-requirements.md`: LiveKit WakeWord、即時フィードバック、青山龍星既定化の要件定義
+- `docs/plan/livekit-wakeword-system-design.md`: LiveKit WakeWord対応の実装可能なシステム設計
 - `docs/plan/tapo-robot-thinking-order.md`: 検討順序ガイド（決める順序）
 - `docs/plan/sbert-skill-router-spec.md`: SBERT Skill Routerの要件・Intentテンプレート検討
 - `docs/plan/sbert-skill-router-system-design.md`: SBERT Skill Routerのコーディング可能なシステム設計
