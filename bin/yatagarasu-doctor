@@ -5,8 +5,7 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-export YATAGARASU_CWD="${YATAGARASU_CWD:-$(pwd)}"
-if [[ "$YATAGARASU_CWD" == "$PROJECT_ROOT" && -d "$PROJECT_ROOT/workspace" ]]; then
+if [[ -z "${YATAGARASU_CWD:-}" ]]; then
     export YATAGARASU_CWD="$PROJECT_ROOT/workspace"
 fi
 
@@ -120,15 +119,22 @@ find_cmd() {
 http_probe() {
     local url="$1"
     local timeout="${2:-2}"
-    python3 - "$url" "$timeout" <<'PY'
+    local token="${3:-}"
+    HOSHIKAGE_PROBE_TOKEN="$token" python3 - "$url" "$timeout" <<'PY'
+import os
 import sys
 import urllib.error
 import urllib.request
 
 url = sys.argv[1]
 timeout = float(sys.argv[2])
+headers = {}
+token = os.environ.get("HOSHIKAGE_PROBE_TOKEN", "")
+if token:
+    headers["Authorization"] = f"Bearer {token}"
+request = urllib.request.Request(url, headers=headers)
 try:
-    with urllib.request.urlopen(url, timeout=timeout) as res:
+    with urllib.request.urlopen(request, timeout=timeout) as res:
         body = res.read(160)
         print(f"{res.status} {body.decode('utf-8', errors='ignore').strip()}")
 except Exception as exc:
@@ -149,6 +155,55 @@ check_command() {
 
     fail "$label: command not found ($cmd)"
     return 1
+}
+
+check_optional_command() {
+    local label="$1"
+    local cmd="$2"
+    local path
+
+    if path="$(find_cmd "$cmd")"; then
+        ok "$label: $path"
+    else
+        info "$label: not installed (optional)"
+    fi
+}
+
+check_agent_commands() {
+    local engine="$1"
+    local available=0
+    local path
+
+    case "$engine" in
+        auto)
+            for command in codex claude opencode; do
+                if path="$(find_cmd "$command")"; then
+                    ok "$command: $path"
+                    available=$((available + 1))
+                else
+                    info "$command: not installed (optional)"
+                fi
+            done
+            if [[ "$available" -eq 0 ]]; then
+                fail "agent CLI: codex, claude, or opencode is required"
+            fi
+            ;;
+        codex)
+            check_command "codex" "codex"
+            check_optional_command "claude" "claude"
+            check_optional_command "opencode" "opencode"
+            ;;
+        claude)
+            check_optional_command "codex" "codex"
+            check_command "claude" "claude"
+            check_optional_command "opencode" "opencode"
+            ;;
+        opencode)
+            check_optional_command "codex" "codex"
+            check_optional_command "claude" "claude"
+            check_command "opencode" "opencode"
+            ;;
+    esac
 }
 
 check_executable() {
@@ -215,6 +270,109 @@ PY
     fi
 }
 
+check_codex_profile() {
+    local profile="$1"
+    local codex_home="${CODEX_HOME:-$HOME/.codex}"
+    local profile_path
+    local details
+    local fields
+    local model
+    local provider_id
+    local base_url
+    local wire_api
+    local env_key
+    local network_access
+    local token=""
+    local ready_base
+    local ready_url
+    local output
+
+    if [[ -z "$profile" ]]; then
+        info "codex profile: Codex CLI default"
+        return
+    fi
+
+    profile_path="$codex_home/${profile}.config.toml"
+    if [[ ! -f "$profile_path" ]]; then
+        fail "codex profile not found: $profile_path"
+        return
+    fi
+    ok "codex profile: $profile"
+
+    if ! details="$(python3 - "$profile_path" <<'PY'
+import sys
+import tomllib
+from pathlib import Path
+
+path = Path(sys.argv[1])
+data = tomllib.loads(path.read_text())
+provider_id = data.get("model_provider", "")
+provider = data.get("model_providers", {}).get(provider_id, {})
+print(data.get("model", ""))
+print(provider_id)
+print(provider.get("base_url", ""))
+print(provider.get("wire_api", ""))
+print(provider.get("env_key", ""))
+print(str(data.get("sandbox_workspace_write", {}).get("network_access", False)).lower())
+PY
+    )"; then
+        fail "codex profile is invalid TOML: $profile_path"
+        return
+    fi
+
+    mapfile -t fields <<<"$details"
+    model="${fields[0]:-}"
+    provider_id="${fields[1]:-}"
+    base_url="${fields[2]:-}"
+    wire_api="${fields[3]:-}"
+    env_key="${fields[4]:-}"
+    network_access="${fields[5]:-false}"
+
+    info "codex profile model: ${model:-"(not set)"}"
+    if [[ "$provider_id" != "hoshikage" ]]; then
+        info "codex profile provider: ${provider_id:-"(not set)"} (Hoshikage probe skipped)"
+        return
+    fi
+
+    if [[ "$wire_api" == "responses" ]]; then
+        ok "Hoshikage provider: responses"
+    else
+        fail "Hoshikage provider wire_api must be responses"
+        return
+    fi
+
+    if [[ -z "$base_url" ]]; then
+        fail "Hoshikage provider base_url is not configured"
+        return
+    fi
+
+    if [[ "$network_access" == "true" ]]; then
+        ok "Codex sandbox network: enabled"
+    else
+        fail "Codex sandbox network must be enabled for network-backed Skills"
+    fi
+
+    if [[ -n "$env_key" ]]; then
+        token="${!env_key:-}"
+        if [[ -z "$token" ]]; then
+            fail "Hoshikage token environment variable is not set: $env_key"
+            return
+        fi
+        ok "Hoshikage token: configured ($env_key)"
+    else
+        info "Hoshikage token: not required by profile"
+    fi
+
+    ready_base="${base_url%/}"
+    ready_base="${ready_base%/v1}"
+    ready_url="${ready_base}/ready"
+    if output="$(http_probe "$ready_url" 2 "$token" 2>&1)"; then
+        ok "Hoshikage ready: $ready_url ($output)"
+    else
+        fail "Hoshikage ready: cannot reach $ready_url ($output)"
+    fi
+}
+
 print_header() {
     cat <<EOF
 Yatagarasu Doctor
@@ -223,12 +381,17 @@ EOF
 }
 
 load_env_file
+USER_LOCAL_BIN="${HOME:-}/.local/bin"
+if [[ -d "$USER_LOCAL_BIN" && ":$PATH:" != *":$USER_LOCAL_BIN:"* ]]; then
+    export PATH="$USER_LOCAL_BIN:$PATH"
+fi
 WORKSPACE="${YATAGARASU_CWD:-$PROJECT_ROOT/workspace}"
 ENGINE="${YATAGARASU_ENGINE:-auto}"
 MODEL="${YATAGARASU_MODEL:-}"
 CODEX_MODEL="${YATAGARASU_CODEX_MODEL:-}"
+CODEX_PROFILE="${YATAGARASU_CODEX_PROFILE:-}"
 CODEX_REASONING_EFFORT="${YATAGARASU_CODEX_REASONING_EFFORT:-}"
-CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-true}"
+CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-false}"
 GO2RTC_HOST="${GO2RTC_HOST:-localhost}"
 GO2RTC_API_PORT="${GO2RTC_API_PORT:-1984}"
 VOICEVOX_ENGINE_HOST="${VOICEVOX_ENGINE_HOST:-127.0.0.1}"
@@ -256,14 +419,14 @@ check_git_env "$WORKSPACE"
 info "engine: $ENGINE"
 info "model: ${MODEL:-"(default)"}"
 info "codex model: ${CODEX_MODEL:-"(Codex CLI default)"}"
+info "codex profile: ${CODEX_PROFILE:-"(Codex CLI default)"}"
 info "codex reasoning effort: ${CODEX_REASONING_EFFORT:-"(Codex CLI default)"}"
 info "codex bypass sandbox: $CODEX_BYPASS_SANDBOX"
 
-check_command "codex" "codex"
-check_command "claude" "claude" || true
-check_command "opencode" "opencode" || true
+check_agent_commands "$ENGINE"
 check_command "ffmpeg" "ffmpeg"
 check_command "python3" "python3"
+check_command "uv" "uv"
 check_executable "zunda" "$SCRIPT_DIR/zunda"
 check_executable "tapovoice" "$SCRIPT_DIR/tapovoice"
 
@@ -277,6 +440,7 @@ case "$ENGINE" in
 esac
 
 check_codex_model "$CODEX_MODEL"
+check_codex_profile "$CODEX_PROFILE"
 
 if [[ -n "$CODEX_REASONING_EFFORT" ]]; then
     case "$CODEX_REASONING_EFFORT" in
