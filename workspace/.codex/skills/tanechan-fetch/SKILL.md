@@ -13,10 +13,11 @@ Fetches a webpage and processes it (extract main content, summarize, etc.) using
 FETCH_SCRIPT=".codex/skills/tanechan-fetch/scripts/fetch.sh"
 $FETCH_SCRIPT "https://tanep.work/some-page" --summarize "TALの最新進捗を要約"
 $FETCH_SCRIPT "https://youtube.com/watch?v=xxx" --extract "動画タイトルと説明文"
+```
 
 ## Usage
 ```bash
-./scripts/fetch.sh "URL" [options]
+.codex/skills/tanechan-fetch/scripts/fetch.sh "URL" [options]
 ```
 
 | Argument       | Description                                      | Default    |

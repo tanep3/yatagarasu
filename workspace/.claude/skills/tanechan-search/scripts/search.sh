@@ -3,6 +3,7 @@
 set -euo pipefail
 
 # Defaults
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEARXNG_URL="${SEARXNG_URL:-http://localhost:8088}"
 QUERY=""
 CATEGORY="general"
@@ -70,9 +71,9 @@ fi
 
 URL="${SEARXNG_URL}/search?${PARAMS}"
 
-echo -e "${GREEN}Searching: $QUERY${NC}"
-echo -e "Category: $CATEGORY | Lang: $LANGUAGE | Page: $PAGE | Engines: ${ENGINES:-default}"
-echo -e "URL: $URL${NC}"
+echo -e "${GREEN}Searching: $QUERY${NC}" >&2
+echo -e "Category: $CATEGORY | Lang: $LANGUAGE | Page: $PAGE | Engines: ${ENGINES:-default}" >&2
+echo -e "URL: $URL${NC}" >&2
 
 # Execute with timeout and fail on error
 RESULT=$(curl -s --max-time 30 -f "$URL" || {
@@ -81,15 +82,10 @@ RESULT=$(curl -s --max-time 30 -f "$URL" || {
 })
 
 if [[ "$FORMAT" == "json" ]]; then
-    # ログをstderrに出す
-    echo -e "${GREEN}Searching: $$   QUERY   $${NC}" >&2
-    echo -e "Category: $CATEGORY | Lang: $LANGUAGE | Page: $PAGE | Engines: ${ENGINES:-default}" >&2
-    echo -e "URL: $$   URL   $${NC}" >&2
-
-    # JSONだけstdoutに
-    if ! echo "$RESULT" | python3 -m json.tool 2>/dev/null; then
-        echo '{"error": "Invalid JSON from SearXNG", "raw": "'"$RESULT"'" }'
+    if ! printf '%s' "$RESULT" | python3 "$SCRIPT_DIR/compact_results.py"; then
+        printf '%s\n' '{"error":"Invalid JSON from SearXNG"}'
+        exit 3
     fi
 else
-    echo "$RESULT"
+    printf '%s\n' "$RESULT"
 fi
