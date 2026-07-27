@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -39,6 +40,7 @@ def test_hoshikage_profile_model_and_token_are_passed_to_codex(tmp_path: Path) -
 printf '%s\\n' "$@" > "$CODEX_ARGS_CAPTURE"
 printf '%s' "${HOSHIKAGE_API_KEY:-}" > "$CODEX_TOKEN_CAPTURE"
 printf '%s' "$PATH" > "$CODEX_PATH_CAPTURE"
+printf '%s' "${UV_CACHE_DIR:-}" > "$UV_CACHE_CAPTURE"
 output_file=""
 while [[ $# -gt 0 ]]; do
     if [[ "$1" == "-o" ]]; then
@@ -55,8 +57,11 @@ printf 'OK\\n' > "$output_file"
     args_capture = tmp_path / "args.txt"
     token_capture = tmp_path / "token.txt"
     path_capture = tmp_path / "path.txt"
+    uv_cache_capture = tmp_path / "uv-cache.txt"
+    agent_tmp = tmp_path / "agent-tmp"
     home = tmp_path / "home"
     (home / ".local" / "bin").mkdir(parents=True)
+    agent_tmp.mkdir()
     env = os.environ.copy()
     env.update(
         {
@@ -69,6 +74,8 @@ printf 'OK\\n' > "$output_file"
             "HOSHIKAGE_API_KEY": "test-secret-token",
             "CODEX_ARGS_CAPTURE": str(args_capture),
             "CODEX_TOKEN_CAPTURE": str(token_capture),
+            "UV_CACHE_CAPTURE": str(uv_cache_capture),
+            "TMPDIR": str(agent_tmp),
             "CODEX_PATH_CAPTURE": str(path_capture),
         }
     )
@@ -89,6 +96,7 @@ printf 'OK\\n' > "$output_file"
     assert "--dangerously-bypass-approvals-and-sandbox" not in args
     assert token_capture.read_text() == "test-secret-token"
     assert path_capture.read_text().split(":")[0] == str(home / ".local" / "bin")
+    assert uv_cache_capture.read_text() == str(agent_tmp / "yatagarasu-uv-cache")
 
 
 def test_codex_profile_is_optional_for_existing_providers() -> None:
@@ -105,6 +113,29 @@ def test_recall_skill_uses_repository_executable_path() -> None:
 
     assert ".codex/skills/recall/scripts/recall.sh" in skill
     assert "\nrecall \"" not in skill
+
+
+def test_agent_instructions_name_executable_search_and_fetch_entries() -> None:
+    instructions = (PROJECT_ROOT / "workspace" / "AGENTS.md").read_text()
+
+    assert (
+        '.codex/skills/tanechan-search/scripts/search.sh "<検索語>"'
+        in instructions
+    )
+    assert (
+        '.codex/skills/tanechan-fetch/scripts/fetch.sh "<URL>"'
+        in instructions
+    )
+    assert "skill tanechan-search" not in instructions
+    assert "skill tanechan-fetch" not in instructions
+
+
+def test_fetch_skill_markdown_has_balanced_code_fences() -> None:
+    skill = (
+        PROJECT_ROOT / "workspace" / ".codex" / "skills" / "tanechan-fetch" / "SKILL.md"
+    ).read_text()
+
+    assert skill.count("```") % 2 == 0
 
 
 def test_launcher_doctor_defaults_to_project_workspace(tmp_path: Path) -> None:
@@ -214,6 +245,76 @@ network_access = true
         assert "Codex sandbox network: enabled" in result.stdout
         assert "Hoshikage ready:" in result.stdout
         assert "test-secret-token" not in result.stdout
+    finally:
+        server.shutdown()
+        thread.join()
+
+
+def test_search_skill_returns_bounded_structured_json() -> None:
+    class SearchHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            payload = {
+                "query": "weather",
+                "number_of_results": 12,
+                "results": [
+                    {
+                        "title": f"Result {index}",
+                        "url": f"https://example.com/{index}",
+                        "content": "x" * 1000,
+                        "publishedDate": "2026-07-27",
+                        "engine": "test",
+                        "unused": "must not leak",
+                    }
+                    for index in range(12)
+                ],
+                "answers": ["answer"],
+                "suggestions": ["suggestion"],
+                "unresponsive_engines": [],
+                "raw": "must not leak",
+            }
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), SearchHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        script = (
+            PROJECT_ROOT
+            / "workspace"
+            / ".codex"
+            / "skills"
+            / "tanechan-search"
+            / "scripts"
+            / "search.sh"
+        )
+        env = os.environ.copy()
+        env["SEARXNG_URL"] = f"http://127.0.0.1:{server.server_port}"
+        result = subprocess.run(
+            [str(script), "weather"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        payload = json.loads(result.stdout)
+        assert payload["number_of_results"] == 12
+        assert payload["returned_results"] == 10
+        assert len(payload["results"]) == 10
+        assert set(payload["results"][0]) == {
+            "title", "url", "content", "publishedDate", "engine"
+        }
+        assert len(payload["results"][0]["content"]) == 500
+        assert len(result.stdout.encode()) < 16384
+        assert "Searching: weather" in result.stderr
     finally:
         server.shutdown()
         thread.join()

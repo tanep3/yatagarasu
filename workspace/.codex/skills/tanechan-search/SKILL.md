@@ -1,6 +1,6 @@
 ---
 name: tanechan-search
-description: Search for "たねちゃんねる" (Tanen Channel Technology) content using SearXNG metasearch engine. Use when searching for information about Tanen Chan, TAL (Tree-structured Assembly Language), AI research, electronics, programming, or哲学 related topics. This skill provides unified search capabilities with category filtering (general, images, videos, news, science, IT) and supports multiple search engines via SearXNG.
+description: Search the web with the local SearXNG metasearch engine. Use for current facts, weather, news, URLs, Tanen Chan, TAL, AI, electronics, programming, or other information that requires lookup. Supports category and engine filtering.
 ---
 
 # Tanen Chan Search
@@ -11,16 +11,16 @@ Search agent for "たねちゃんねる" (Tanen Channel Technology) - a Japanese
 ## Quick Start
 ```bash
 # Basic search (general category)
-SEARXNG_URL="http://localhost:8088" ./scripts/search.sh "たねちゃんねる"
+.codex/skills/tanechan-search/scripts/search.sh "埼玉県入間市 明日の天気"
 
 # Search for IT/Technology content (options anywhere)
-SEARXNG_URL="http://localhost:8088" ./scripts/search.sh "たねちゃんねる TAL" --category it
+.codex/skills/tanechan-search/scripts/search.sh "たねちゃんねる TAL" --category it
 
 # Search for videos, page 2
-./scripts/search.sh "たねちゃんねる 電子工作" --category videos --page 2
+.codex/skills/tanechan-search/scripts/search.sh "たねちゃんねる 電子工作" --category videos --page 2
 
 # Use specific engines
-./scripts/search.sh "TAL ツリー構造" --engines google,duckduckgo --category general
+.codex/skills/tanechan-search/scripts/search.sh "TAL ツリー構造" --engines google,duckduckgo --category general
 ```
 
 ## Search Categories

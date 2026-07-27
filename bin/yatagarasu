@@ -45,6 +45,11 @@ if [[ -d "$USER_LOCAL_BIN" && ":$PATH:" != *":$USER_LOCAL_BIN:"* ]]; then
     export PATH="$USER_LOCAL_BIN:$PATH"
 fi
 
+# Agent Tool calls run inside the workspace-write sandbox. Keep uv's mutable
+# cache under the sandbox-writable temporary directory.
+UV_CACHE_DIR="${UV_CACHE_DIR:-${TMPDIR:-/tmp}/yatagarasu-uv-cache}"
+export UV_CACHE_DIR
+
 if [[ "${1:-}" == "doctor" ]]; then
     shift
     exec "$SCRIPT_DIR/yatagarasu-doctor" "$@"

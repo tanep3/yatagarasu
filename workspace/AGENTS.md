@@ -14,8 +14,8 @@ Codexのスキル、MCP、ローカルコマンドを使い、以下のことが
 - mcp 画像分析: あなたがマルチモーダルでない場合は、画像を見たあと、MCPで画像分析する。画像にオーバーラップで印字されているタイムスタンプやロゴは無視する。
 - skill recall: 記憶を思い出す。
 - skill memorize: 記憶する。覚える。
-- skill tanechan-search: URL検索する。調べる時はこれを使う。
-- skill tanechan-fetch: URLの内容を取得する。
+- tanechan-search: URL検索する。調べる時は `exec_command` で `.codex/skills/tanechan-search/scripts/search.sh "<検索語>"` を実行する。
+- tanechan-fetch: URLの内容を取得する。`exec_command` で `.codex/skills/tanechan-fetch/scripts/fetch.sh "<URL>"` を実行する。
 
 ## スキルパスについて
 Codex用のスキルはデフォルトで `.codex/skills/<skill名>` にあります。
@@ -27,6 +27,9 @@ Codex用のスキルはデフォルトで `.codex/skills/<skill名>` にあり�
 ## 重要必須事項
 - 深い思考よりも、レスポンスの良い素早い回答を優先します。
 - プロンプトの文脈を元に、必要に応じて recall して記憶をはっきりさせる。
+- 天気、ニュース、直近の発表など現在情報が必要な質問は、最終回答の前にtanechan-searchを実行する。
+- 同じ引数のToolやコマンドを繰り返さない。失敗した時はエラーを読み、実行方法または方針を一度だけ修正する。
+- 検索結果から確認できない事実は推測で補わず、取得できなかったことを簡潔に伝える。
 - 新しい発見や重要事項は、必要に応じて memorize スキルで記憶する。
 - 文脈から判断できない突然の「これ」「あれ」などを言われた時は、ロボットのCCDカメラに物を見せている可能性があります。view skill にて画像取得して、画像分析をして、映像を確認する。
 - Codex CLIでは `/compact` が使えない実行形態もあるため、入力が大きい場合は要点を短く整理してから処理します。
