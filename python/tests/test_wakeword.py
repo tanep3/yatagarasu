@@ -11,6 +11,8 @@ from wakeword import (
     AudioWindow,
     LatestWindowWorker,
     LiveKitWakeBackend,
+    WakeActivityGate,
+    WakeScorePolicy,
     build_cpu_predictor,
 )
 
@@ -51,6 +53,80 @@ def test_audio_window_owns_appended_memory() -> None:
         window.snapshot(),
         np.array([1, 2, 3, 4], dtype=np.int16),
     )
+
+
+def test_wake_activity_gate_uses_rms_when_vad_misses_speech() -> None:
+    gate = WakeActivityGate(-50.0)
+    quiet = np.full(1_280, 4, dtype=np.int16)
+    voice_level = np.full(1_280, 256, dtype=np.int16)
+
+    quiet_active, quiet_dbfs = gate.is_active(quiet, vad_speech=False)
+    voice_active, voice_dbfs = gate.is_active(voice_level, vad_speech=False)
+
+    assert not quiet_active
+    assert quiet_dbfs < -50.0
+    assert voice_active
+    assert voice_dbfs >= -50.0
+
+
+def test_wake_activity_gate_honors_vad_at_low_rms() -> None:
+    gate = WakeActivityGate(-50.0)
+
+    active, _ = gate.is_active(
+        np.zeros(1_280, dtype=np.int16),
+        vad_speech=True,
+    )
+
+    assert active
+
+
+def test_wake_score_policy_detects_three_early_candidates() -> None:
+    policy = WakeScorePolicy(
+        threshold=0.6,
+        early_threshold=0.15,
+        early_consecutive=3,
+    )
+
+    first = policy.observe(0.16)
+    second = policy.observe(0.18)
+    third = policy.observe(0.17)
+
+    assert not first.detected
+    assert first.early_count == 1
+    assert not second.detected
+    assert second.early_count == 2
+    assert third.detected
+    assert third.trigger == "early"
+    assert third.effective_threshold == 0.15
+
+
+def test_wake_score_policy_resets_early_sequence_on_low_score() -> None:
+    policy = WakeScorePolicy(
+        threshold=0.6,
+        early_threshold=0.15,
+        early_consecutive=3,
+    )
+
+    policy.observe(0.2)
+    policy.observe(0.1)
+    decision = policy.observe(0.2)
+
+    assert not decision.detected
+    assert decision.early_count == 1
+
+
+def test_wake_score_policy_keeps_normal_threshold_immediate() -> None:
+    policy = WakeScorePolicy(
+        threshold=0.6,
+        early_threshold=0.15,
+        early_consecutive=3,
+    )
+
+    decision = policy.observe(0.8)
+
+    assert decision.detected
+    assert decision.trigger == "normal"
+    assert decision.effective_threshold == 0.6
 
 
 def test_scheduler_supports_zero_and_nonzero_warmup() -> None:

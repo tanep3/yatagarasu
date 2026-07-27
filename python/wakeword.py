@@ -17,12 +17,96 @@ ScoreMap = Mapping[str, float]
 Predictor = Callable[[Int16Array], ScoreMap]
 
 
+class WakeActivityGate:
+    def __init__(self, rms_threshold_dbfs: float) -> None:
+        if not -120.0 <= rms_threshold_dbfs <= 0.0:
+            raise ValueError("rms_threshold_dbfs must be between -120 and 0")
+        self._rms_threshold_dbfs = rms_threshold_dbfs
+
+    @property
+    def rms_threshold_dbfs(self) -> float:
+        return self._rms_threshold_dbfs
+
+    def is_active(self, pcm: Int16Array, *, vad_speech: bool) -> tuple[bool, float]:
+        samples = np.asarray(pcm, dtype=np.int16).reshape(-1)
+        if samples.size == 0:
+            return vad_speech, -120.0
+        audio = samples.astype(np.float32) / 32768.0
+        rms = float(np.sqrt(np.mean(np.square(audio))))
+        rms_dbfs = -120.0 if rms <= 1e-9 else 20.0 * np.log10(rms)
+        return vad_speech or rms_dbfs >= self._rms_threshold_dbfs, rms_dbfs
+
+
 @dataclass(frozen=True)
 class WakeDetection:
     model_name: str
     score: float
     threshold: float
     detected_at: float
+    trigger: str = "normal"
+
+
+@dataclass(frozen=True)
+class WakeScoreDecision:
+    detected: bool
+    trigger: str = ""
+    effective_threshold: float = 0.0
+    early_count: int = 0
+
+
+class WakeScorePolicy:
+    def __init__(
+        self,
+        *,
+        threshold: float,
+        early_threshold: float,
+        early_consecutive: int,
+    ) -> None:
+        if not 0.0 < early_threshold <= threshold <= 1.0:
+            raise ValueError(
+                "thresholds must satisfy 0 < early_threshold <= threshold <= 1"
+            )
+        if early_consecutive <= 0:
+            raise ValueError("early_consecutive must be greater than zero")
+        self._threshold = threshold
+        self._early_threshold = early_threshold
+        self._early_consecutive = early_consecutive
+        self._early_count = 0
+
+    @property
+    def early_threshold(self) -> float:
+        return self._early_threshold
+
+    def observe(self, score: float) -> WakeScoreDecision:
+        if score >= self._threshold:
+            self._early_count = 0
+            return WakeScoreDecision(
+                detected=True,
+                trigger="normal",
+                effective_threshold=self._threshold,
+            )
+
+        if score < self._early_threshold:
+            self._early_count = 0
+            return WakeScoreDecision(detected=False)
+
+        self._early_count += 1
+        if self._early_count >= self._early_consecutive:
+            count = self._early_count
+            self._early_count = 0
+            return WakeScoreDecision(
+                detected=True,
+                trigger="early",
+                effective_threshold=self._early_threshold,
+                early_count=count,
+            )
+        return WakeScoreDecision(
+            detected=False,
+            early_count=self._early_count,
+        )
+
+    def reset_sequence(self) -> None:
+        self._early_count = 0
 
 
 @dataclass(frozen=True)
@@ -312,6 +396,8 @@ class LiveKitWakeBackend:
         idle_interval_sec: float,
         speech_hold_sec: float,
         warmup_sec: float,
+        early_threshold: float = 0.15,
+        early_consecutive: int = 3,
         predictor: Predictor | None = None,
     ) -> None:
         if predictor is None:
@@ -325,6 +411,11 @@ class LiveKitWakeBackend:
         )
         self._worker = LatestWindowWorker(predictor)
         self._threshold = threshold
+        self._score_policy = WakeScorePolicy(
+            threshold=threshold,
+            early_threshold=early_threshold,
+            early_consecutive=early_consecutive,
+        )
         self._debounce_sec = debounce_sec
         self._generation = 0
         self._last_detection_at: float | None = None
@@ -374,7 +465,20 @@ class LiveKitWakeBackend:
             result.elapsed_sec * 1000,
             self.dropped_count,
         )
-        if score < self._threshold:
+        decision = self._score_policy.observe(score)
+        if self._score_policy.early_threshold <= score < self._threshold:
+            logging.info(
+                (
+                    "wake candidate model=%s score=%.4f threshold=%.4f "
+                    "early_count=%d elapsed_ms=%.1f"
+                ),
+                model_name,
+                score,
+                self._threshold,
+                decision.early_count,
+                result.elapsed_sec * 1000,
+            )
+        if not decision.detected:
             return None
         if (
             self._last_detection_at is not None
@@ -389,14 +493,16 @@ class LiveKitWakeBackend:
         return WakeDetection(
             model_name=model_name,
             score=score,
-            threshold=self._threshold,
+            threshold=decision.effective_threshold,
             detected_at=result.captured_at,
+            trigger=decision.trigger,
         )
 
     def reset_audio(self) -> None:
         self._generation += 1
         self._window.reset()
         self._scheduler.reset()
+        self._score_policy.reset_sequence()
 
     def close(self) -> None:
         self._worker.close()

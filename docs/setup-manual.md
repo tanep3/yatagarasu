@@ -193,6 +193,7 @@ TAPO_RTSP_PASSWORD="<camera-account-password>"
 
 # listend
 LISTEND_RTSP_URL="rtsp://localhost:8554/tapo_tc70"
+LISTEND_RTSP_LOW_LATENCY="true"
 LISTEND_WAKE_BACKEND="livekit"
 LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス"
 LISTEND_STOP_WORDS="ストップ"

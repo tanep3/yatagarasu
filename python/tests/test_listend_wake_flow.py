@@ -7,7 +7,7 @@ import numpy as np
 from audio_prompt import PromptStatus
 from listen_state import ListenSession, ListenState
 from listend import ListendService
-from wakeword import WakeDetection
+from wakeword import WakeActivityGate, WakeDetection
 
 
 class FakeWakeBackend:
@@ -75,6 +75,7 @@ def new_service() -> tuple[ListendService, FakeWakeBackend, FakePromptPlayer]:
     service.last_system_audio_at = 0.0
     service._handled_prompt_status = PromptStatus.IDLE
     service._wake_suppressed = False
+    service._wake_rms_active = False
     service._has_speech = lambda pcm: True
     service._feed_segment = lambda *args, **kwargs: (_ for _ in ()).throw(
         AssertionError("STT segment path must not run while OFF/livekit")
@@ -82,6 +83,7 @@ def new_service() -> tuple[ListendService, FakeWakeBackend, FakePromptPlayer]:
     backend = FakeWakeBackend()
     prompt = FakePromptPlayer()
     service.wake_backend = backend
+    service.wake_activity_gate = WakeActivityGate(-50.0)
     service.prompt_player = prompt
     return service, backend, prompt
 

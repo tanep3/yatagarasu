@@ -72,7 +72,6 @@
   - `hai.mp3`
 - 配布時の格納先:
   - `assets/audio/wake_prompt_hai.mp3`
-  - 実行用低遅延版: `assets/audio/wake_prompt_hai.wav`
 - SHA-256:
   - `5039cd6f77dd7d57db65edefac5b2f56356f4f4a3c04a6ef9d42fd16c2d13257`
 - 音声仕様:
@@ -80,7 +79,6 @@
   - 8kHz
   - mono
   - 約1.01秒
-  - 実行用WAVは先頭・末尾無音を除いたPCM 16-bit、約0.28秒
 - 配布時のファイルmode: `0644`
 - 必須クレジット:
   - `VOICEVOX:青山龍星`
@@ -92,7 +90,7 @@
 - ONNXウェイクワード検出器の追加
 - RTSP音声のローリングバッファ管理
 - OFF / WAKING / ON状態遷移
-- 同梱の低遅延PCM WAVによる即時フィードバック
+- 同梱MP3による即時フィードバック
 - フィードバック音声の回り込み抑制
 - 命令音声のVAD、無音確定、STT連携
 - STTウェイク方式への明示的切替
@@ -157,7 +155,7 @@ Yatagarasu: カメラを右へ移動
 - 現在のVADセグメントとSTT対象バッファを破棄する。
 - ONNXローリングバッファを初期化する。
 - `WAKING`へ遷移する。
-- 同梱MP3から生成した低遅延PCM WAVを`tapovoice`経由で再生する。
+- 同梱MP3を`tapovoice`経由で再生する。
 - 再生開始処理に失敗しても、警告ログを出して命令待機へ進む。
 
 ### 6.4 命令待機
@@ -211,15 +209,21 @@ dispatch後も`ON`を維持する場合は、dispatch完了時にセッション
 標準設定を次に示す。閾値と時間値は実機評価後に確定する。
 
 ```bash
+# RTSP音声入力のbufferを抑制
+LISTEND_RTSP_LOW_LATENCY="true"
+
 # Wake backend: livekit / stt
 LISTEND_WAKE_BACKEND="livekit"
 
 # 空なら同梱モデルを使用
 LISTEND_WAKE_MODEL_PATH=""
 LISTEND_WAKE_THRESHOLD="0.6"
+LISTEND_WAKE_EARLY_THRESHOLD="0.15"
+LISTEND_WAKE_EARLY_CONSECUTIVE="3"
 LISTEND_WAKE_DEBOUNCE_SEC="2.0"
 LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.08"
 LISTEND_WAKE_IDLE_INTERVAL_SEC="1.5"
+LISTEND_WAKE_ACTIVITY_RMS_DBFS="-50"
 LISTEND_WAKE_SPEECH_HOLD_SEC="2.0"
 LISTEND_WAKE_WARMUP_SEC="0.0"
 
@@ -282,6 +286,12 @@ SPEAKER_ID="13"
 - ONNXモデルの入力窓は常に2秒分とし、短い入力を直接渡さないこと。
 - 標準設定では、起動・reset後の最初の音声チャンクから推論可能であること。
 - 待機中は1.5秒間隔、発話中は80ms間隔を初期値とし、無音時に80ms間隔では推論しないこと。
+- Silero VADが発話開始を逃した場合は、設定可能なRMS音量gateでactive intervalへ移行すること。
+- RMS音量gateはウェイク推論のschedulerだけに使用し、命令STTのVAD判定を置き換えないこと。
+- 通常閾値未満でも早期閾値以上が設定回数連続した場合はウェイク検出とすること。
+- 早期候補が1回でも閾値を下回った場合は連続回数をリセットすること。
+- 通常閾値以上では連続回数を待たず従来どおり即時検出すること。
+- RTSP入力は設定で無効化可能なFFmpeg低遅延フラグを既定で使用すること。
 - 第8世代Core i7で60秒のウォームアップ後、5分間の無音待機を測定し、
   ONNXウェイク導入による`listend`の追加CPU使用率を平均5 percentage points以下とすることを
   性能目標とする。
@@ -403,7 +413,7 @@ VOICEVOX:青山龍星
 
 - `workspace/.env.example`の`SPEAKER_ID`が`13`である。
 - 新規標準設定の通常応答が青山龍星で再生される。
-- ウェイク即時フィードバックは、話者設定にかかわらず同梱の低遅延WAVを使用する。
+- ウェイク即時フィードバックは、話者設定にかかわらず同梱MP3を使用する。
 
 ### AC-08 配布
 

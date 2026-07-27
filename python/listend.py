@@ -47,7 +47,12 @@ from listen_state import (
     SessionAction,
     SessionDecision,
 )
-from wakeword import LiveKitWakeBackend, SttWakeBackend, WakeBackend
+from wakeword import (
+    LiveKitWakeBackend,
+    SttWakeBackend,
+    WakeActivityGate,
+    WakeBackend,
+)
 
 DEFAULT_AUDIO_FILTER = "highpass=f=120,lowpass=f=5000"
 DEFAULT_SEGMENT_END_SILENCE_CHUNKS = 5
@@ -114,6 +119,33 @@ def env_int(name: str, default: int) -> int:
     except ValueError:
         logging.warning("Invalid int env %s=%s; fallback=%s", name, value, default)
         return default
+
+
+def env_int_strict(
+    name: str,
+    default: int,
+    *,
+    minimum: int | None = None,
+) -> int:
+    value = os.getenv(name, "").strip()
+    try:
+        parsed = default if not value else int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer: {value}") from exc
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be >= {minimum}: {parsed}")
+    return parsed
+
+
+def env_bool_strict(name: str, default: bool) -> bool:
+    value = os.getenv(name, "").strip().lower()
+    if not value:
+        return default
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be true or false: {value}")
 
 
 def env_float(name: str, default: float) -> float:
@@ -185,9 +217,12 @@ class WakeSettings:
     backend: str
     model_path: Path
     threshold: float
+    early_threshold: float
+    early_consecutive: int
     debounce_sec: float
     active_interval_sec: float
     idle_interval_sec: float
+    activity_rms_dbfs: float
     speech_hold_sec: float
     warmup_sec: float
     prompt_audio_path: Path
@@ -200,6 +235,7 @@ class ListendSettings:
     workspace_path: Path
     rtsp_url: str
     rtsp_transport: str
+    rtsp_low_latency: bool
     stt_backend: str
     stt_language: str
     whisper_model: str
@@ -337,6 +373,20 @@ class ListendSettings:
             1.5,
             minimum=active_interval_sec,
         )
+        wake_threshold = env_float_strict(
+            "LISTEND_WAKE_THRESHOLD",
+            0.6,
+            minimum=0.0,
+            maximum=1.0,
+            minimum_inclusive=False,
+        )
+        early_threshold = env_float_strict(
+            "LISTEND_WAKE_EARLY_THRESHOLD",
+            0.15,
+            minimum=0.0,
+            maximum=wake_threshold,
+            minimum_inclusive=False,
+        )
         wake_settings = WakeSettings(
             backend=wake_backend,
             model_path=resolve_wake_path(
@@ -346,12 +396,12 @@ class ListendSettings:
                 / "wakeword"
                 / "nee_yatagarasu.onnx",
             ),
-            threshold=env_float_strict(
-                "LISTEND_WAKE_THRESHOLD",
-                0.6,
-                minimum=0.0,
-                maximum=1.0,
-                minimum_inclusive=False,
+            threshold=wake_threshold,
+            early_threshold=early_threshold,
+            early_consecutive=env_int_strict(
+                "LISTEND_WAKE_EARLY_CONSECUTIVE",
+                3,
+                minimum=1,
             ),
             debounce_sec=env_float_strict(
                 "LISTEND_WAKE_DEBOUNCE_SEC",
@@ -360,6 +410,12 @@ class ListendSettings:
             ),
             active_interval_sec=active_interval_sec,
             idle_interval_sec=idle_interval_sec,
+            activity_rms_dbfs=env_float_strict(
+                "LISTEND_WAKE_ACTIVITY_RMS_DBFS",
+                -50.0,
+                minimum=-120.0,
+                maximum=0.0,
+            ),
             speech_hold_sec=env_float_strict(
                 "LISTEND_WAKE_SPEECH_HOLD_SEC",
                 2.0,
@@ -373,7 +429,7 @@ class ListendSettings:
             ),
             prompt_audio_path=resolve_wake_path(
                 "LISTEND_WAKE_PROMPT_AUDIO",
-                workspace_path.parent / "assets" / "audio" / "wake_prompt_hai.wav",
+                workspace_path.parent / "assets" / "audio" / "wake_prompt_hai.mp3",
             ),
             prompt_guard_sec=env_float_strict(
                 "LISTEND_WAKE_PROMPT_GUARD_SEC",
@@ -451,6 +507,10 @@ class ListendSettings:
             workspace_path=workspace_path,
             rtsp_url=rtsp_url,
             rtsp_transport=rtsp_transport,
+            rtsp_low_latency=env_bool_strict(
+                "LISTEND_RTSP_LOW_LATENCY",
+                True,
+            ),
             stt_backend=stt_backend,
             stt_language=stt_language,
             whisper_model=os.getenv("LISTEND_WHISPER_MODEL", "base").strip() or "base",
@@ -676,6 +736,7 @@ class ListendService:
         self.chunk_index = 0
         self._handled_prompt_status = PromptStatus.IDLE
         self._wake_suppressed = False
+        self._wake_rms_active = False
 
         self.vad_model = load_silero_vad()
         self.whisper_model: WhisperModel | None = None
@@ -684,6 +745,9 @@ class ListendService:
         self.reazon_transcribe: object | None = None
         self._init_stt_backend()
         self.wake_backend = self._init_wake_backend()
+        self.wake_activity_gate = WakeActivityGate(
+            settings.wake.activity_rms_dbfs
+        )
         tapovoice_argv = shlex.split(self.settings.wake_ack_tapovoice_cmd)
         self.prompt_player = TapovoiceFilePromptPlayer(
             tapovoice_argv,
@@ -706,6 +770,8 @@ class ListendService:
         return LiveKitWakeBackend(
             model_path=wake.model_path,
             threshold=wake.threshold,
+            early_threshold=wake.early_threshold,
+            early_consecutive=wake.early_consecutive,
             debounce_sec=wake.debounce_sec,
             active_interval_sec=wake.active_interval_sec,
             idle_interval_sec=wake.idle_interval_sec,
@@ -973,6 +1039,8 @@ class ListendService:
             "-loglevel",
             "error",
         ]
+        if self.settings.rtsp_low_latency:
+            cmd.extend(["-fflags", "nobuffer", "-flags", "low_delay"])
         if transport != "auto":
             cmd.extend(["-rtsp_transport", transport])
         cmd.extend(
@@ -1110,18 +1178,31 @@ class ListendService:
                 self.wake_backend.reset_audio()
                 self._wake_suppressed = False
 
+            wake_activity, rms_dbfs = self.wake_activity_gate.is_active(
+                pcm,
+                vad_speech=has_speech,
+            )
+            rms_accelerated = wake_activity and not has_speech
+            if rms_accelerated and not self._wake_rms_active:
+                logging.debug(
+                    "wake activity accelerated by RMS rms_dbfs=%.1f threshold=%.1f",
+                    rms_dbfs,
+                    self.wake_activity_gate.rms_threshold_dbfs,
+                )
+            self._wake_rms_active = rms_accelerated
             self.wake_backend.feed_audio(
                 pcm,
-                has_speech=has_speech,
+                has_speech=wake_activity,
                 now=now,
             )
             detection = self.wake_backend.poll(now=now)
             if detection is not None:
                 logging.info(
-                    "wake detected model=%s score=%.4f threshold=%.4f",
+                    "wake detected model=%s score=%.4f threshold=%.4f trigger=%s",
                     detection.model_name,
                     detection.score,
                     detection.threshold,
+                    detection.trigger,
                 )
                 self._apply_session_decision(self.session.on_livekit_wake(now), now)
             return
@@ -1135,6 +1216,7 @@ class ListendService:
         self.wake_backend.reset_audio()
         self._handled_prompt_status = PromptStatus.IDLE
         self._wake_suppressed = False
+        self._wake_rms_active = False
         if decision.action is not SessionAction.NONE:
             logging.info("state transition: -> OFF (%s)", decision.reason)
 
@@ -2130,7 +2212,7 @@ def setup_logging(level_name: str) -> None:
     level = getattr(logging, level_name.upper(), logging.INFO)
     logging.basicConfig(
         level=level,
-        format="%(asctime)s %(levelname)s %(message)s",
+        format="%(asctime)s.%(msecs)03d %(levelname)s %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         force=True,
     )
@@ -2177,18 +2259,26 @@ def main() -> int:
             settings.reazon_device,
             settings.reazon_precision,
         )
-    logging.info("rtsp_transport=%s", settings.rtsp_transport)
+    logging.info(
+        "rtsp_transport=%s low_latency=%s",
+        settings.rtsp_transport,
+        settings.rtsp_low_latency,
+    )
     logging.info(
         (
             "wake_backend=%s model=%s threshold=%.3f debounce_sec=%.2f "
-            "interval_sec=%.2f/%.2f warmup_sec=%.2f"
+            "early=%.3fx%d interval_sec=%.2f/%.2f "
+            "activity_rms_dbfs=%.1f warmup_sec=%.2f"
         ),
         settings.wake.backend,
         settings.wake.model_path,
         settings.wake.threshold,
         settings.wake.debounce_sec,
+        settings.wake.early_threshold,
+        settings.wake.early_consecutive,
         settings.wake.active_interval_sec,
         settings.wake.idle_interval_sec,
+        settings.wake.activity_rms_dbfs,
         settings.wake.warmup_sec,
     )
     logging.info(

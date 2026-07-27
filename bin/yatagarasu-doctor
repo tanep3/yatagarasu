@@ -399,8 +399,8 @@ check_livekit_wakeword() {
         model_path="$WORKSPACE/$model_path"
     fi
     if [[ -z "$prompt_path" ]]; then
-        prompt_path="$PROJECT_ROOT/assets/audio/wake_prompt_hai.wav"
-        expected_prompt_hash="098ecc8053a169d61f33742f9603f516e1928a444b71acf6d5b2759e1e0ac0e1"
+        prompt_path="$PROJECT_ROOT/assets/audio/wake_prompt_hai.mp3"
+        expected_prompt_hash="5039cd6f77dd7d57db65edefac5b2f56356f4f4a3c04a6ef9d42fd16c2d13257"
     elif [[ "$prompt_path" != /* ]]; then
         prompt_path="$WORKSPACE/$prompt_path"
     fi
