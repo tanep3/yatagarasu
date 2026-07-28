@@ -186,8 +186,7 @@ def env_csv(name: str, default: Iterable[str]) -> tuple[str, ...]:
     value = os.getenv(name, "").strip()
     if not value:
         return tuple(default)
-    normalized = value.replace("、", ",")
-    parts = [part.strip() for part in normalized.split(",")]
+    parts = [part.strip() for part in value.split(",")]
     filtered = [part for part in parts if part]
     if not filtered:
         return tuple(default)
@@ -375,7 +374,7 @@ class ListendSettings:
         )
         wake_threshold = env_float_strict(
             "LISTEND_WAKE_THRESHOLD",
-            0.6,
+            0.65,
             minimum=0.0,
             maximum=1.0,
             minimum_inclusive=False,
@@ -934,11 +933,16 @@ class ListendService:
                     # --- ハートビート（データ有無にかかわらず定期出力）---
                     if now - last_heartbeat_at >= self.settings.heartbeat_sec:
                         logging.info(
-                            "heartbeat: state=%s chunks=%d total=%d buffered=%d",
+                            (
+                                "heartbeat: state=%s chunks=%d total=%d "
+                                "buffered=%d wake_inferences=%d wake_dropped=%d"
+                            ),
                             self.state,
                             chunks_since_heartbeat,
                             total_chunks,
                             len(read_buffer),
+                            self.wake_backend.inference_count,
+                            self.wake_backend.dropped_count,
                         )
                         last_heartbeat_at = now
                         chunks_since_heartbeat = 0

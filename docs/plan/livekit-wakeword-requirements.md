@@ -217,7 +217,7 @@ LISTEND_WAKE_BACKEND="livekit"
 
 # 空なら同梱モデルを使用
 LISTEND_WAKE_MODEL_PATH=""
-LISTEND_WAKE_THRESHOLD="0.6"
+LISTEND_WAKE_THRESHOLD="0.65"
 LISTEND_WAKE_EARLY_THRESHOLD="0.15"
 LISTEND_WAKE_EARLY_CONSECUTIVE="3"
 LISTEND_WAKE_DEBOUNCE_SEC="2.0"
@@ -234,7 +234,7 @@ LISTEND_WAKE_PROMPT_GUARD_SEC="0.6"
 LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
 
 # STT backend時の文字列ウェイク、および表示・ログ用
-LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス"
+LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス,ねえ、やたがら"
 
 # 1ターンの終端と、命令待ちキャンセル
 LISTEND_SESSION_END_SILENCE_SEC="3"
@@ -285,7 +285,7 @@ SPEAKER_ID="13"
 - ONNX推論がRTSP音声読込、VAD、STTをブロックしないこと。
 - ONNXモデルの入力窓は常に2秒分とし、短い入力を直接渡さないこと。
 - 標準設定では、起動・reset後の最初の音声チャンクから推論可能であること。
-- 待機中は1.5秒間隔、発話中は80ms間隔を初期値とし、無音時に80ms間隔では推論しないこと。
+- 待機中は1.5秒間隔、発話中は80ms間隔を確定値とし、無音時に80ms間隔では推論しないこと。
 - Silero VADが発話開始を逃した場合は、設定可能なRMS音量gateでactive intervalへ移行すること。
 - RMS音量gateはウェイク推論のschedulerだけに使用し、命令STTのVAD判定を置き換えないこと。
 - 通常閾値未満でも早期閾値以上が設定回数連続した場合はウェイク検出とすること。
@@ -305,6 +305,7 @@ SPEAKER_ID="13"
 - Tapo/go2rtcネットワーク区間の実再生遅延は、上記200msの測定対象外とする。
 - OFF状態では、ウェイク検出前にfaster-whisperまたはReazonSpeechを実行しないこと。
 - 推論回数、推論時間、キュー待ち、drop件数、scoreを計測可能にすること。
+- heartbeatには累積推論回数とdrop件数を記録すること。
 
 ## 11. ログ・診断要件
 
@@ -430,6 +431,9 @@ VOICEVOX:青山龍星
 - テレビ音声と通常の生活音を含む8時間の待機試験で、誤検出を1回以下とする。
 - 閾値決定時は正例の検出率と誤検出率を両方記録する。
 
+実機受入とCPU測定の確定結果は
+`docs/plan/livekit-wakeword-test-results.md`へ記録する。
+
 ### AC-10 無音タイマー
 
 - 「はい」の後に何も話さない場合、`ON`遷移から3秒後に発話せず`OFF`へ戻る。
@@ -488,7 +492,7 @@ Yatagarasuでは既存のRTSP入力とSilero VADを利用し、音声取得経�
   - 実機調整後の初期値は`0.6`秒。
   - Tapo実機で「はい」の聞こえ終わりと命令録音開始を確認して決定する。
 - ONNX推論間隔
-  - 実機調整後の初期値は発話中80ms、待機中1.5秒、発話保持2秒。
+  - 実機調整後の確定値は発話中80ms、待機中1.5秒、発話保持2秒。
   - 第8世代Core i7でCPU使用率、検出率、検出遅延を測定して決定する。
 
 ## 17. 将来拡張

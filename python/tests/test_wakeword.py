@@ -206,6 +206,7 @@ def test_latest_window_worker_replaces_pending_request() -> None:
             threading.Event().wait(0.01)
         assert latest is not None
         assert latest.scores["wake"] == 3.0
+        assert worker.completed_count == 2
     finally:
         worker.close()
 
@@ -243,6 +244,8 @@ def test_livekit_backend_detects_threshold_hit() -> None:
         assert detection is not None
         assert detection.model_name == "nee_yatagarasu"
         assert detection.score == 0.8
+        assert backend.inference_count == 1
+        assert backend.dropped_count == 0
     finally:
         backend.close()
 

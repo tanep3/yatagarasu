@@ -76,23 +76,30 @@ OFF状態でSTTを常時実行しないため、従来の文字列ウェイク�
 
 ```bash
 LISTEND_WAKE_BACKEND="livekit"
-LISTEND_WAKE_THRESHOLD="0.6"
+LISTEND_WAKE_THRESHOLD="0.65"
 LISTEND_WAKE_EARLY_THRESHOLD="0.15"
 LISTEND_WAKE_EARLY_CONSECUTIVE="3"
 LISTEND_WAKE_WARMUP_SEC="0.0"
 LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.08"
+LISTEND_WAKE_IDLE_INTERVAL_SEC="1.5"
 LISTEND_WAKE_ACTIVITY_RMS_DBFS="-50"
+LISTEND_WAKE_SPEECH_HOLD_SEC="2.0"
 LISTEND_WAKE_PROMPT_GUARD_SEC="0.6"
 LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
 ```
 
 従来方式へ戻す場合は`LISTEND_WAKE_BACKEND="stt"`を指定します。
+STT方式では、ウェイク語と命令を「マイカメラ、右を向いて」のように一息で発話します。
+`LISTEND_WAKE_WORDS`はASCIIカンマで語句を区切り、日本語読点は語句の一部として扱います。
 ONNX方式のウェイク語は`.env`の文字列変更では変わりません。別のウェイク語には
 対応するONNXモデルが必要です。
 
 ウェイク検出時の応答音声には、VOICEVOXで生成した青山龍星の音声を使用しています。
 
 `VOICEVOX:青山龍星`
+
+第8世代Core i7でのCPU測定結果と実機受入結果は
+[LiveKit WakeWord試験結果](docs/plan/livekit-wakeword-test-results.md)を参照してください。
 
 ## LLM実行基盤（Codex CLI / Claude Code / opencode）
 

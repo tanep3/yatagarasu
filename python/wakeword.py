@@ -121,6 +121,12 @@ class InferenceResult:
 class WakeBackend(Protocol):
     requires_off_transcription: bool
 
+    @property
+    def inference_count(self) -> int: ...
+
+    @property
+    def dropped_count(self) -> int: ...
+
     def feed_audio(
         self,
         pcm: Int16Array,
@@ -311,6 +317,7 @@ class LatestWindowWorker:
         self._result: InferenceResult | None = None
         self._closing = False
         self._dropped_count = 0
+        self._completed_count = 0
         self._thread = threading.Thread(
             target=self._run,
             name="wakeword-inference",
@@ -322,6 +329,11 @@ class LatestWindowWorker:
     def dropped_count(self) -> int:
         with self._condition:
             return self._dropped_count
+
+    @property
+    def completed_count(self) -> int:
+        with self._condition:
+            return self._completed_count
 
     def submit(
         self,
@@ -381,6 +393,7 @@ class LatestWindowWorker:
             )
             with self._condition:
                 self._result = result
+                self._completed_count += 1
 
 
 class LiveKitWakeBackend:
@@ -424,6 +437,10 @@ class LiveKitWakeBackend:
     @property
     def dropped_count(self) -> int:
         return self._worker.dropped_count
+
+    @property
+    def inference_count(self) -> int:
+        return self._worker.completed_count
 
     def feed_audio(
         self,
@@ -514,6 +531,14 @@ class LiveKitWakeBackend:
 
 class SttWakeBackend:
     requires_off_transcription = True
+
+    @property
+    def inference_count(self) -> int:
+        return 0
+
+    @property
+    def dropped_count(self) -> int:
+        return 0
 
     def feed_audio(
         self,

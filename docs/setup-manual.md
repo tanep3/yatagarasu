@@ -195,7 +195,12 @@ TAPO_RTSP_PASSWORD="<camera-account-password>"
 LISTEND_RTSP_URL="rtsp://localhost:8554/tapo_tc70"
 LISTEND_RTSP_LOW_LATENCY="true"
 LISTEND_WAKE_BACKEND="livekit"
-LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス"
+LISTEND_WAKE_THRESHOLD="0.65"
+LISTEND_WAKE_EARLY_THRESHOLD="0.15"
+LISTEND_WAKE_ACTIVE_INTERVAL_SEC="0.08"
+LISTEND_WAKE_IDLE_INTERVAL_SEC="1.5"
+LISTEND_WAKE_SPEECH_HOLD_SEC="2.0"
+LISTEND_WAKE_WORDS="ねぇ、ヤタガラス,ねえ、ヤタガラス,ねえ、やたがら"
 LISTEND_STOP_WORDS="ストップ"
 LISTEND_STT_BACKEND="faster-whisper"   # or reazonspeech-k2
 LISTEND_SILENCE_TIMEOUT_SEC="3"
@@ -503,6 +508,17 @@ YATAGARASU_CWD="$(pwd)/workspace" LISTEND_LOG_LEVEL=DEBUG ./python/.venv/bin/pyt
 LISTEND_WAKE_BACKEND="stt"
 ```
 
+STT方式ではウェイク語と命令を同じ発話へ含めます。例えば
+「マイカメラ、右を向いて」と発話します。`LISTEND_WAKE_WORDS`の区切りは
+ASCIIカンマ`,`です。`ねぇ、ヤタガラス`内の日本語読点`、`は語句の一部として保持されます。
+
+切替後は次を確認します。
+
+1. サービスを再起動する。
+2. ログの`wake_backend=stt`を確認する。
+3. ウェイク語と命令を一息で発話する。
+4. `wake word detected in OFF segment`と目的の動作を確認する。
+
 ## 9. よくあるトラブル
 
 1. `461 Unsupported transport`
@@ -518,6 +534,17 @@ LISTEND_WAKE_BACKEND="stt"
 4. wake/stop を拾わない
 - 対策: `LISTEND_LOG_LEVEL=DEBUG` で `[listend chunk#...]` / `[listend match#...]` を確認。
 - 対策: STT backend（`faster-whisper` / `reazonspeech-k2`）を切替比較。
+- ONNXのscoreが`0.01`未満へ張り付き、呼びかけてもVADやRMSが動かない場合は、
+  RTSPが無音PCMだけを流している可能性があります。次の順で音声経路を張り直します。
+
+```bash
+systemctl --user restart go2rtc.service
+sleep 5
+systemctl --user restart yatagarasu.service
+```
+
+- 復旧後、`audio read loop started`を確認してから呼びかけます。
+- RTSPのデータ受信やheartbeatが継続していても、実音声が無音のケースがあります。
 
 5. `tapovoice` で音が出ない
 - 対策: `tapo_tc70_speak` ストリーム定義、`go2rtc` APIポート（1984）を確認。

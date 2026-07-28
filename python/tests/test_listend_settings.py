@@ -55,14 +55,36 @@ def test_livekit_is_default_backend(monkeypatch, tmp_path: Path) -> None:
     assert settings.wake.backend == "livekit"
     assert settings.rtsp_low_latency
     assert settings.wake.active_interval_sec == 0.08
+    assert settings.wake.idle_interval_sec == 1.5
+    assert settings.wake.threshold == 0.65
     assert settings.wake.early_threshold == 0.15
     assert settings.wake.early_consecutive == 3
     assert settings.wake.activity_rms_dbfs == -50.0
+    assert settings.wake.speech_hold_sec == 2.0
     assert settings.wake.warmup_sec == 0.0
     assert settings.wake.prompt_guard_sec == 0.6
     assert settings.wake.prompt_timeout_sec == 2.0
     assert settings.silence_timeout_sec == 3.0
     assert settings.wake_ack_speaker_id == "13"
+    assert settings.wake_words == ("ねぇ、ヤタガラス",)
+
+
+def test_wake_words_keep_japanese_comma(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_minimal_env(monkeypatch, tmp_path)
+    monkeypatch.setenv(
+        "LISTEND_WAKE_WORDS",
+        "ねぇ、ヤタガラス,ねえ、ヤタガラス",
+    )
+
+    settings = ListendSettings.from_env()
+
+    assert settings.wake_words == (
+        "ねぇ、ヤタガラス",
+        "ねえ、ヤタガラス",
+    )
 
 
 def test_stt_backend_does_not_require_onnx_assets(

@@ -63,7 +63,7 @@ dispatch完了後に無活動タイマーをリセットする。
 LiveKitの`WakeWordModel.predict()`はstatelessであり、呼び出しごとに約2秒の
 音声窓全体からmel spectrogramとspeech embeddingを再計算する。
 
-Silero VADに連動した推論間隔を採用し、80ms実行は発話中だけに限定する。
+Silero VADに連動した推論間隔を採用し、active推論は発話中だけに限定する。
 
 - 発話開始時: 即時要求
 - 発話中: 80ms間隔
@@ -611,7 +611,7 @@ class WakeSettings:
 |---|---:|---:|---|
 | `LISTEND_WAKE_BACKEND` | str | `livekit` | `livekit / stt`のみ |
 | `LISTEND_WAKE_MODEL_PATH` | path | 同梱ONNX | readable file |
-| `LISTEND_WAKE_THRESHOLD` | float | `0.6` | `0.0 < value <= 1.0` |
+| `LISTEND_WAKE_THRESHOLD` | float | `0.65` | `0.0 < value <= 1.0` |
 | `LISTEND_WAKE_EARLY_THRESHOLD` | float | `0.15` | `0.0 < value <= threshold` |
 | `LISTEND_WAKE_EARLY_CONSECUTIVE` | int | `3` | `>= 1` |
 | `LISTEND_WAKE_DEBOUNCE_SEC` | float | `2.0` | `>= 0` |
@@ -896,7 +896,7 @@ fake clockを使用し、実時間sleepを使わない。
 第8世代Core i7で次を測定する。
 
 1. `LISTEND_WAKE_BACKEND=stt`と無音入力を使用し、
-   同じRTSP、VAD、80msチャンクでONNX推論を無効化
+   同じRTSP、VAD、80ms音声チャンクでONNX推論を無効化
 2. 60秒warm-up
 3. 5分測定
 4. ONNX有効化
@@ -952,11 +952,11 @@ fake clockを使用し、実時間sleepを使わない。
 - 検出率と誤検出率の受け入れ条件を満たす
 - doctorと文書で既存環境を安全に更新できる
 
-## 24. 実機で確定する値
+## 24. 実機で確定した値
 
-実装開始値:
+2026-07-28実機受入値:
 
-- threshold: `0.6`
+- threshold: `0.65`
 - early threshold / consecutive: `0.15 / 3`
 - active interval: `0.08`
 - idle interval: `1.5`
@@ -967,6 +967,7 @@ fake clockを使用し、実時間sleepを使わない。
 - session end silence: `3.0`
 - session timeout: `3.0`
 
-threshold、interval、warmup、prompt guard、prompt timeoutは
-コード構造を変えず`.env`だけで調整する。
-値の確定結果は要件定義、`.env.example`、セットアップガイドへ反映する。
+確定根拠とCPU測定値は
+`docs/plan/livekit-wakeword-test-results.md`に記録する。
+今後もthreshold、interval、warmup、prompt guard、prompt timeoutは
+コード構造を変えず`.env`だけで調整できる。

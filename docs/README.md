@@ -6,6 +6,7 @@
 
 - `docs/setup-manual.md`: 実運用向けセットアップ手順（systemd / Docker / .env / 動作確認）
 - `docs/semanticmemory-ruri-v3-migration.md`: 既存の記憶を保護したRuri v3移行・確認・復旧手順
+- `docs/plan/livekit-wakeword-test-results.md`: ONNXウェイクの実機受入・CPU測定結果
 - `docs/plan/README.md`: 中期・長期計画、要件、設計、デプロイ方針
 - `docs/tasks/README.md`: 実装タスク管理と進捗追跡
 - `docs/phase_logs/README.md`: Phase単位の作業ログ
@@ -19,12 +20,13 @@
 3. `docs/plan/tapo-robot-requirements.md`
 4. `docs/plan/livekit-wakeword-requirements.md`
 5. `docs/plan/livekit-wakeword-system-design.md`
-6. `docs/plan/tapo-robot-thinking-order.md`
-7. `docs/plan/sbert-skill-router-spec.md`
-8. `docs/plan/sbert-skill-router-system-design.md`
-9. `docs/plan/tapo-robot-listend-system-design.md`
-10. `docs/plan/tapo-robot-listend-install.md`
-11. `docs/plan/tapo-robot-architecture.md`
-12. `docs/plan/tapo-robot-deployment.md`
-13. `docs/tasks/tapo-robot-backlog.md`
-14. `docs/considerations/open-issues.md`
+6. `docs/plan/livekit-wakeword-test-results.md`
+7. `docs/plan/tapo-robot-thinking-order.md`
+8. `docs/plan/sbert-skill-router-spec.md`
+9. `docs/plan/sbert-skill-router-system-design.md`
+10. `docs/plan/tapo-robot-listend-system-design.md`
+11. `docs/plan/tapo-robot-listend-install.md`
+12. `docs/plan/tapo-robot-architecture.md`
+13. `docs/plan/tapo-robot-deployment.md`
+14. `docs/tasks/tapo-robot-backlog.md`
+15. `docs/considerations/open-issues.md`
