@@ -47,6 +47,12 @@
 - 新規SemanticMemory環境の既定埋め込みモデルをRuri v3に変更した
 - 既存環境を自動的にRuri v3へ切り替えず、v2を維持する互換方針を明記した
 - `docs/semanticmemory-ruri-v3-migration.md`にバックアップ、移行確認、v2への復旧手順を追加した
+- SBERT Routerの内部制御プロンプトではなく、元のユーザー発話をSemanticMemoryの
+  自動リコール検索語と会話保存本文に使用するよう修正
+- 「さっき」「直前」などのリコールは意味検索だけに委ねず、直近会話を優先
+- SemanticMemoryの自動リコール・保存失敗をdispatch警告ログへ記録
+- systemdが`.env`を読込済みの場合に`recall-context.sh`が`set -e`でAPI呼び出し前に
+  終了し、自動リコールだけが動かなくなる不具合を修正
 
 ## V1.1.0 (2026-02-28)
 

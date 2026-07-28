@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -158,3 +160,73 @@ def test_router_only_dispatch_enters_off_without_audio_reset() -> None:
 
     assert service.state is ListenState.OFF
     assert service._reset_audio_input_after_dispatch is False
+
+
+def test_dispatch_passes_original_text_as_memory_prompt(monkeypatch) -> None:
+    service, _, _ = new_service()
+    service.settings.dispatch_cmd = "/bin/fake-dispatch"
+    service.settings.dispatch_timeout_sec = 10.0
+    service.settings.workspace_path = Path("/tmp/yatagarasu-workspace")
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured.update(kwargs)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("listend.subprocess.run", fake_run)
+
+    service._dispatch(
+        "Router内部の制御プロンプト",
+        memory_text="元のユーザー発話",
+    )
+
+    assert captured["input"] == "Router内部の制御プロンプト"
+    assert captured["env"]["YATAGARASU_MEMORY_PROMPT"] == "元のユーザー発話"
+
+
+def test_dispatch_logs_only_tagged_memory_warnings(monkeypatch, caplog) -> None:
+    service, _, _ = new_service()
+    service.settings.dispatch_cmd = "/bin/fake-dispatch"
+    service.settings.dispatch_timeout_sec = 10.0
+    service.settings.workspace_path = Path("/tmp/yatagarasu-workspace")
+    monkeypatch.setattr(
+        "listend.subprocess.run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout="",
+            stderr=(
+                "種ちゃん\n"
+                "YATAGARASU_MEMORY_WARNING: 会話文脈を取得できませんでした。"
+            ),
+        ),
+    )
+    caplog.set_level(logging.WARNING)
+
+    service._dispatch("test")
+
+    assert "dispatch memory warning" in caplog.text
+    assert "会話文脈を取得できませんでした" in caplog.text
+    assert "種ちゃん" not in caplog.text
+
+
+def test_recent_recall_uses_recent_context_instead_of_semantic_only() -> None:
+    service, _, _ = new_service()
+    service.settings.workspace_path = Path("/opt/yatagarasu/workspace")
+    decision = SimpleNamespace(original_text="さっきの話覚えてる")
+
+    argv, _ = service._router_action_specs(decision)["recall_memory"]
+
+    assert argv[0] == "/opt/yatagarasu/bin/recall-context.sh"
+    assert "--recent-limit" in argv
+    assert argv[argv.index("--threshold") + 1] == "1.0"
+
+
+def test_topic_recall_keeps_semantic_recall_skill() -> None:
+    service, _, _ = new_service()
+    service.settings.workspace_path = Path("/opt/yatagarasu/workspace")
+    decision = SimpleNamespace(original_text="Rustについて覚えてる")
+
+    argv, _ = service._router_action_specs(decision)["recall_memory"]
+
+    assert argv[0].endswith("/workspace/.codex/skills/recall/scripts/recall.sh")

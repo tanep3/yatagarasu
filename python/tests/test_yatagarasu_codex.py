@@ -106,6 +106,129 @@ def test_codex_profile_is_optional_for_existing_providers() -> None:
     assert 'codex_args+=(--profile "$CODEX_PROFILE")' in launcher
 
 
+def test_router_prompt_uses_original_user_text_for_memory(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    bin_dir = app_root / "bin"
+    workspace = app_root / "workspace"
+    fake_path = tmp_path / "fake-path"
+    bin_dir.mkdir(parents=True)
+    workspace.mkdir()
+    fake_path.mkdir()
+
+    shutil.copy2(PROJECT_ROOT / "bin" / "yatagarasu", bin_dir / "yatagarasu")
+    write_executable(bin_dir / "zunda", "#!/bin/bash\ncat\n")
+    write_executable(bin_dir / "tapovoice", "#!/bin/bash\ncat >/dev/null\n")
+    write_executable(
+        bin_dir / "recall-context.sh",
+        "#!/bin/bash\nprintf '%s' \"$1\" > \"$RECALL_CAPTURE\"\nprintf 'memory_context: original-memory\\n'\n",
+    )
+    write_executable(
+        bin_dir / "memorize.sh",
+        "#!/bin/bash\nprintf '%s' \"$1\" > \"$MEMORIZE_CAPTURE\"\n",
+    )
+    write_executable(
+        fake_path / "codex",
+        """#!/bin/bash
+printf '%s' "${YATAGARASU_MEMORY_PROMPT:-}" > "$MEMORY_ENV_CAPTURE"
+last=""
+output_file=""
+while [[ $# -gt 0 ]]; do
+    last="$1"
+    if [[ "$1" == "-o" ]]; then
+        output_file="$2"
+        shift 2
+    else
+        shift
+    fi
+done
+printf '%s' "$last" > "$PROMPT_CAPTURE"
+printf 'agent-response' > "$output_file"
+""",
+    )
+
+    recall_capture = tmp_path / "recall.txt"
+    memorize_capture = tmp_path / "memorize.txt"
+    prompt_capture = tmp_path / "prompt.txt"
+    memory_env_capture = tmp_path / "memory-env.txt"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_path}:{env['PATH']}",
+            "YATAGARASU_ENGINE": "codex",
+            "YATAGARASU_MEMORY_ENABLED": "true",
+            "YATAGARASU_MEMORY_PROMPT": "元のユーザー発話",
+            "RECALL_CAPTURE": str(recall_capture),
+            "MEMORIZE_CAPTURE": str(memorize_capture),
+            "PROMPT_CAPTURE": str(prompt_capture),
+            "MEMORY_ENV_CAPTURE": str(memory_env_capture),
+        }
+    )
+
+    subprocess.run(
+        [str(bin_dir / "yatagarasu"), "Router内部の制御プロンプト"],
+        cwd=workspace,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert recall_capture.read_text() == "元のユーザー発話"
+    assert prompt_capture.read_text().endswith("Router内部の制御プロンプト")
+    assert "memory_context: original-memory" in prompt_capture.read_text()
+    assert memorize_capture.read_text() == (
+        "[user]元のユーザー発話\n[agent]agent-response"
+    )
+    assert memory_env_capture.read_text() == ""
+
+
+def test_recall_context_accepts_preloaded_systemd_environment(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    bin_dir = tmp_path / "bin"
+    fake_path = tmp_path / "fake-path"
+    workspace.mkdir()
+    bin_dir.mkdir()
+    fake_path.mkdir()
+    script = bin_dir / "recall-context.sh"
+    shutil.copy2(PROJECT_ROOT / "bin" / "recall-context.sh", script)
+    (workspace / ".env").write_text(
+        'YATAGARASU_MEMORY_ENABLED="true"\n'
+        'SEMANTIC_MEMORY_API_URL="http://from-file.invalid/api"\n'
+    )
+    curl_capture = tmp_path / "curl-args.txt"
+    write_executable(
+        fake_path / "curl",
+        """#!/bin/bash
+printf '%s\\n' "$@" > "$CURL_CAPTURE"
+printf '{"recent":[{"main_text":"直前の会話"}],"semantic":[]}'
+""",
+    )
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_path}:{env['PATH']}",
+            "YATAGARASU_CWD": str(workspace),
+            "YATAGARASU_MEMORY_ENABLED": "true",
+            "SEMANTIC_MEMORY_API_URL": "http://preloaded.invalid/api",
+            "CURL_CAPTURE": str(curl_capture),
+        }
+    )
+
+    result = subprocess.run(
+        [str(script), "さっきの話"],
+        cwd=workspace,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "直前の会話" in result.stdout
+    assert "http://preloaded.invalid/api/retrieve" in curl_capture.read_text()
+
+
 def test_recall_skill_uses_repository_executable_path() -> None:
     skill = (
         PROJECT_ROOT / "workspace" / ".codex" / "skills" / "recall" / "SKILL.md"

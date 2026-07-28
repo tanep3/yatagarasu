@@ -177,10 +177,18 @@ if [ -z "$PROMPT" ]; then
     exit 1
 fi
 
+# RouterがLLM向け制御プロンプトへ変換した場合も、記憶の検索と保存には
+# 元のユーザー発話を使用する。
+MEMORY_PROMPT="${YATAGARASU_MEMORY_PROMPT:-$PROMPT}"
+unset YATAGARASU_MEMORY_PROMPT
+
 # 記憶コンテキストを取得
 MEMORY_CONTEXT=""
 if [[ "$MEMORY_ENABLED" == "true" ]]; then
-    MEMORY_CONTEXT=$("$SCRIPT_DIR/recall-context.sh" "$PROMPT" 2>/dev/null) || MEMORY_CONTEXT=""
+    if ! MEMORY_CONTEXT=$("$SCRIPT_DIR/recall-context.sh" "$MEMORY_PROMPT" 2>/dev/null); then
+        echo "YATAGARASU_MEMORY_WARNING: SemanticMemoryから会話文脈を取得できませんでした。" >&2
+        MEMORY_CONTEXT=""
+    fi
 fi
 
 # システムプロンプトを構築
@@ -381,6 +389,8 @@ printf '%s\n' "$RESPONSE" | "$SCRIPT_DIR/zunda" --stdout -s "$SPEAKER" | "$SCRIP
 
 # 会話を記憶に保存
 if [[ "$MEMORY_ENABLED" == "true" ]] && [[ -n "$RESPONSE" ]]; then
-    CONVERSATION="[user]${PROMPT}"$'\n'"[agent]${RESPONSE}"
-    "$SCRIPT_DIR/memorize.sh" "$CONVERSATION" >/dev/null 2>&1 || true
+    CONVERSATION="[user]${MEMORY_PROMPT}"$'\n'"[agent]${RESPONSE}"
+    if ! "$SCRIPT_DIR/memorize.sh" "$CONVERSATION" >/dev/null 2>&1; then
+        echo "YATAGARASU_MEMORY_WARNING: SemanticMemoryへ会話を保存できませんでした。" >&2
+    fi
 fi

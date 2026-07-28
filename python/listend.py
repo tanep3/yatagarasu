@@ -62,6 +62,14 @@ DEFAULT_VAD_HANGOVER_CHUNKS = 6
 DEFAULT_MIN_TRANSCRIBE_RMS_DBFS = -50.0
 # ReazonSpeech k2 は ~30秒程度が入力上限のため、長尺は分割処理する。
 DEFAULT_REAZON_MAX_SEGMENT_SEC = 28.0
+RECENT_RECALL_TERMS = (
+    "さっき",
+    "先ほど",
+    "直前",
+    "今の話",
+    "今言った",
+    "今話した",
+)
 
 # auto モードでのトランスポート試行順序（go2rtc は TCP のみサポートが一般的）
 _AUTO_TRANSPORT_ORDER = ("tcp", "udp")
@@ -1498,7 +1506,7 @@ class ListendService:
             return False
         if not self._play_wake_ack():
             logging.warning("wake ack was not completed before dispatch; continuing")
-        self._dispatch(dispatch_text)
+        self._dispatch(dispatch_text, memory_text=text)
         # エージェント発話後のタイムスタンプを更新（ループ防止用）
         self.last_wake_ack_at = time.monotonic()
         self.last_system_audio_at = self.last_wake_ack_at
@@ -1921,6 +1929,19 @@ class ListendService:
         view_timeout = env_float("YATAGARASU_SBERT_VIEW_TIMEOUT_SEC", 10.0)
         recall_timeout = env_float("YATAGARASU_SBERT_RECALL_TIMEOUT_SEC", 8.0)
         recall_query = self._build_recall_query(decision)
+        recall_argv = [str(recall), recall_query]
+        if self._is_recent_recall(decision.original_text):
+            recall_context = (
+                self.settings.workspace_path.parent / "bin" / "recall-context.sh"
+            )
+            recall_argv = [
+                str(recall_context),
+                recall_query,
+                "--recent-limit",
+                str(env_int("SEMANTIC_MEMORY_RECENT_LIMIT", 3)),
+                "--threshold",
+                "1.0",
+            ]
         return {
             "move_camera_calibrate": ([str(move), "--calibrate"], move_timeout),
             "move_camera_left": ([str(move), "--left"], move_timeout),
@@ -1928,7 +1949,7 @@ class ListendService:
             "move_camera_up": ([str(move), "--up"], move_timeout),
             "move_camera_down": ([str(move), "--down"], move_timeout),
             "capture_image": ([str(capture)], view_timeout),
-            "recall_memory": ([str(recall), recall_query], recall_timeout),
+            "recall_memory": (recall_argv, recall_timeout),
         }
 
     def _build_recall_query(self, decision: RouterDecision) -> str:
@@ -1937,6 +1958,11 @@ class ListendService:
             return text
         recent = " ".join(self.session_text_chunks[-3:]).strip()
         return recent or text or "最近の会話"
+
+    @staticmethod
+    def _is_recent_recall(text: str) -> bool:
+        normalized = unicodedata.normalize("NFKC", text).lower()
+        return any(term in normalized for term in RECENT_RECALL_TERMS)
 
     @staticmethod
     def _extract_capture_path(stderr: str) -> str | None:
@@ -1988,7 +2014,7 @@ Middle判定のIntent候補:
 {instructions}
 """.strip()
 
-    def _dispatch(self, text: str) -> None:
+    def _dispatch(self, text: str, *, memory_text: str | None = None) -> None:
         argv = shlex.split(self.settings.dispatch_cmd)
         if not argv:
             logging.error("dispatch command is empty")
@@ -1996,6 +2022,8 @@ Middle判定のIntent候補:
 
         env = os.environ.copy()
         env["YATAGARASU_CWD"] = str(self.settings.workspace_path)
+        if memory_text:
+            env["YATAGARASU_MEMORY_PROMPT"] = memory_text
         started = time.monotonic()
 
         try:
@@ -2030,6 +2058,20 @@ Middle判定のIntent候補:
             )
             return
 
+        stderr = (result.stderr or "").strip()
+        memory_warnings = [
+            line.removeprefix("YATAGARASU_MEMORY_WARNING:").strip()
+            for line in stderr.splitlines()
+            if line.startswith("YATAGARASU_MEMORY_WARNING:")
+        ]
+        if memory_warnings:
+            logging.warning(
+                "dispatch memory warning elapsed=%.2fs detail=%s",
+                elapsed,
+                " | ".join(memory_warnings),
+            )
+        elif stderr and self._debug_enabled():
+            logging.debug("dispatch stderr elapsed=%.2fs detail=%s", elapsed, stderr)
         logging.info("dispatch succeeded elapsed=%.2fs", elapsed)
 
     def _play_wake_ack(self) -> bool:
