@@ -69,6 +69,10 @@ _AUTO_TRANSPORT_ORDER = ("tcp", "udp")
 _INITIAL_DATA_PROBE_SEC = 5.0
 
 
+class AudioInputReset(Exception):
+    """Restart only the RTSP audio consumer to discard buffered system speech."""
+
+
 def normalize_stt_backend(value: str) -> str:
     raw = value.strip().lower()
     mapping = {
@@ -736,6 +740,7 @@ class ListendService:
         self._handled_prompt_status = PromptStatus.IDLE
         self._wake_suppressed = False
         self._wake_rms_active = False
+        self._reset_audio_input_after_dispatch = False
 
         self.vad_model = load_silero_vad()
         self.whisper_model: WhisperModel | None = None
@@ -910,6 +915,7 @@ class ListendService:
             self._reset_for_audio_connection(time.monotonic())
 
             # --- メインオーディオ読み取りループ ---
+            intentional_audio_reset = False
             try:
                 read_buffer = bytearray()
                 last_data_at = time.monotonic()
@@ -979,8 +985,16 @@ class ListendService:
                         chunk = bytes(read_buffer[:chunk_bytes])
                         del read_buffer[:chunk_bytes]
                         self._process_chunk(chunk)
+                        if self._reset_audio_input_after_dispatch:
+                            self._reset_audio_input_after_dispatch = False
+                            raise AudioInputReset
                         total_chunks += 1
                         chunks_since_heartbeat += 1
+            except AudioInputReset:
+                intentional_audio_reset = True
+                logging.info(
+                    "resetting RTSP audio consumer to discard buffered system speech"
+                )
             except Exception as exc:
                 if self.stop_requested:
                     break
@@ -995,6 +1009,10 @@ class ListendService:
 
             if self.stop_requested:
                 break
+
+            if intentional_audio_reset:
+                reconnect_attempts = 0
+                continue
 
             reconnect_attempts += 1
             if (
@@ -1331,8 +1349,11 @@ class ListendService:
             return
 
         if action is SessionAction.DISPATCH:
-            self._dispatch_session(decision.reason)
-            self.session.on_dispatch_completed(time.monotonic())
+            reset_audio_input = self._dispatch_session(decision.reason)
+            completion = self.session.on_dispatch_completed(time.monotonic())
+            if reset_audio_input:
+                self._reset_audio_input_after_dispatch = True
+            self._apply_session_decision(completion, time.monotonic())
 
     def _reset_audio_session(self) -> None:
         self.in_segment = False
@@ -1465,22 +1486,23 @@ class ListendService:
         if normalized:
             self.session_text_chunks.append(normalized)
 
-    def _dispatch_session(self, reason: str) -> None:
+    def _dispatch_session(self, reason: str) -> bool:
         text = " ".join(self.session_text_chunks).strip()
         self.session_text_chunks.clear()
         if not text:
-            return
+            return False
         logging.info("dispatch session (%s): %s", reason, text)
         dispatch_text = self._prepare_dispatch_text(text)
         if dispatch_text is None:
             logging.info("dispatch completed by SBERT Router without LLM")
-            return
+            return False
         if not self._play_wake_ack():
             logging.warning("wake ack was not completed before dispatch; continuing")
         self._dispatch(dispatch_text)
         # エージェント発話後のタイムスタンプを更新（ループ防止用）
         self.last_wake_ack_at = time.monotonic()
         self.last_system_audio_at = self.last_wake_ack_at
+        return True
 
     def _emit_chunk_debug(
         self,

@@ -21,6 +21,9 @@
 - STT互換ウェイク語の日本語読点がCSV区切りとして分割される問題を修正
 - RTSPが無音PCMを流し続ける場合のgo2rtc/listend再接続手順をセットアップガイドへ追加
 - FFmpegのRTSP入力へ`nobuffer`と`low_delay`を適用し、カメラ音声の入力遅延を短縮
+- 1ウェイク1命令へ変更し、dispatch完了後に`OFF`へ戻るよう修正
+- LLM応答中にRTSP入力へ蓄積した自己音声を破棄し、応答を再び命令として扱う
+  自己対話ループを防止
 - `bin/yatagarasu` が Codex CLI / Claude Code / opencode を選択実行できるようになった
   - `YATAGARASU_ENGINE`
   - `YATAGARASU_CODEX_MODEL`

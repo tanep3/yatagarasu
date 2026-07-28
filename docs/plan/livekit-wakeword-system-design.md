@@ -500,8 +500,10 @@ prompt processは通常、音声をgo2rtcへ登録した時点で終了する。
 3. stop語なら`OFF`
 4. 通常テキストはsessionへ追加
 5. state machineの`tick()`が`DISPATCH`を返したら1ターンdispatch
-6. dispatch成功・失敗・Router完結のいずれでも完了時刻でtimerをreset
-7. pending textが無い状態で3秒無活動なら`OFF`
+6. dispatch成功・失敗・Router完結のいずれでも`OFF`へ遷移
+7. システム音声を再生した場合は、RTSP audio consumerを待ち時間なしで再起動し、
+   dispatch中に蓄積した自己音声を破棄
+8. Routerだけで完結して音声を再生しない場合はconsumerを維持
 
 ## 12. listend.py統合
 
@@ -945,7 +947,8 @@ fake clockを使用し、実時間sleepを使わない。
 - RTSP loopがONNX推論とprompt processを待たない
 - 1本の推論workerと1件のpending上限が守られる
 - 無指示キャンセルがON遷移から3秒後に動く
-- dispatch直後にOFFへ遷移しない
+- dispatch完了後にOFFへ遷移し、1ウェイク1命令を保証する
+- LLM応答中に蓄積したRTSP音声を破棄し、自己音声の再dispatchを防ぐ
 - 「はい」の後の命令だけをSTTへ渡す
 - 既存SBERT Skill RouterとLLM dispatchが動く
 - 追加CPU使用率5 percentage points以下を実機目標として測定する

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import numpy as np
 
 from audio_prompt import PromptStatus
-from listen_state import ListenSession, ListenState
+from listen_state import ListenSession, ListenState, SessionAction, SessionDecision
 from listend import ListendService
 from wakeword import WakeActivityGate, WakeDetection
 
@@ -76,6 +76,7 @@ def new_service() -> tuple[ListendService, FakeWakeBackend, FakePromptPlayer]:
     service._handled_prompt_status = PromptStatus.IDLE
     service._wake_suppressed = False
     service._wake_rms_active = False
+    service._reset_audio_input_after_dispatch = False
     service._has_speech = lambda pcm: True
     service._feed_segment = lambda *args, **kwargs: (_ for _ in ()).throw(
         AssertionError("STT segment path must not run while OFF/livekit")
@@ -129,3 +130,31 @@ def test_prompt_timeout_enters_on_without_guard() -> None:
     service._poll_waking(1.1)
 
     assert service.state is ListenState.ON
+
+
+def test_llm_dispatch_enters_off_and_requests_audio_reset() -> None:
+    service, _, _ = new_service()
+    service.session.on_stt_wake(1.0)
+    service._dispatch_session = lambda reason: True
+
+    service._apply_session_decision(
+        SessionDecision(SessionAction.DISPATCH, "test"),
+        4.0,
+    )
+
+    assert service.state is ListenState.OFF
+    assert service._reset_audio_input_after_dispatch is True
+
+
+def test_router_only_dispatch_enters_off_without_audio_reset() -> None:
+    service, _, _ = new_service()
+    service.session.on_stt_wake(1.0)
+    service._dispatch_session = lambda reason: False
+
+    service._apply_session_decision(
+        SessionDecision(SessionAction.DISPATCH, "test"),
+        4.0,
+    )
+
+    assert service.state is ListenState.OFF
+    assert service._reset_audio_input_after_dispatch is False

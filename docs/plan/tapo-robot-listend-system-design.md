@@ -62,7 +62,7 @@
 
 1. `OFF` + `E_WAKEWORD_DETECTED` -> `ON`
 2. `ON` + `E_STOPWORD_DETECTED` -> `OFF`
-3. `ON` + `E_SESSION_END_SILENCE` -> `ON`（dispatchのみ）
+3. `ON` + `E_SESSION_END_SILENCE` -> dispatch完了後に`OFF`
 4. `ON` + `E_OFF_TIMEOUT_SILENCE` -> `OFF`
 
 ## 4. フィードバック音声（現行挙動）
@@ -90,7 +90,10 @@
 - stop miss ならセッション追加
 6. `ON` 無音でターン確定時に、必要ならSBERT Skill Routerを実行
 7. LLM応答が必要な場合だけ `LISTEND_WAKE_ACK_WORD` を再生して dispatch
-8. `ON` 無音タイムアウトで `OFF`
+8. dispatch完了後に`OFF`へ遷移
+9. システム音声を再生した場合はRTSP音声consumerを即時再接続し、
+   dispatch中に蓄積した自己音声を破棄
+10. `ON` 無音タイムアウトで `OFF`
 
 ## 6. 設定仕様（`workspace/.env`）
 

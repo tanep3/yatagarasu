@@ -76,9 +76,13 @@ class ListenSession:
         if self.state is ListenState.ON:
             self._last_activity_at = now
 
-    def on_dispatch_completed(self, now: float) -> None:
-        if self.state is ListenState.ON:
-            self._last_activity_at = now
+    def on_dispatch_completed(self, now: float) -> SessionDecision:
+        del now
+        if self.state is not ListenState.ON:
+            return SessionDecision(SessionAction.NONE)
+        self.state = ListenState.OFF
+        self._prompt_guard_deadline = None
+        return SessionDecision(SessionAction.ENTER_OFF, "dispatch completed")
 
     def on_stop(self, now: float, reason: str) -> SessionDecision:
         del now

@@ -64,13 +64,23 @@ def test_dispatch_has_priority_over_off() -> None:
     assert session.state is ListenState.ON
 
 
-def test_dispatch_completion_restarts_empty_session_timeout() -> None:
+def test_dispatch_completion_enters_off() -> None:
     session = new_session(silence_timeout_sec=3.0)
     session.on_stt_wake(5.0)
-    session.on_dispatch_completed(8.0)
 
-    assert session.tick(10.99, has_pending_text=False).action is SessionAction.NONE
-    assert session.tick(11.0, has_pending_text=False).action is SessionAction.ENTER_OFF
+    decision = session.on_dispatch_completed(8.0)
+
+    assert decision.action is SessionAction.ENTER_OFF
+    assert session.state is ListenState.OFF
+
+
+def test_dispatch_completion_is_ignored_while_off() -> None:
+    session = new_session()
+
+    decision = session.on_dispatch_completed(8.0)
+
+    assert decision.action is SessionAction.NONE
+    assert session.state is ListenState.OFF
 
 
 def test_voice_detection_extends_session() -> None:
