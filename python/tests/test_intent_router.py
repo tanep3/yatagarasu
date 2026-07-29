@@ -28,9 +28,13 @@ class KeywordEmbedder:
         for text in texts:
             row = np.array(
                 [
-                    1.0
-                    if ("見え" in text if feature == "__view__" else feature in text)
-                    else 0.0
+                    (
+                        3.0
+                        if feature == "__view__" and "見え" in text
+                        else 1.0
+                        if feature != "__view__" and feature in text
+                        else 0.0
+                    )
                     for feature in self.features
                 ]
             )
@@ -48,8 +52,8 @@ def settings() -> RouterSettings:
         model_name="fake",
         device="cpu",
         offline=True,
-        high_threshold=0.5,
-        middle_threshold=0.4,
+        high_threshold=0.3,
+        middle_threshold=0.2,
         top_k=5,
     )
 
@@ -85,6 +89,19 @@ def test_colloquial_view_scene_conjugations_trigger_capture():
         assert decision.flags == ("capture_image",)
         assert decision.requires_llm is True
         assert decision.high_hits[0].intent_id == "view_scene"
+
+
+def test_view_scene_templates_are_visual_and_use_strict_threshold():
+    view_scene = next(
+        intent
+        for intent in build_intents_from_env(settings())
+        if intent.intent_id == "view_scene"
+    )
+
+    assert "状況を教えて" not in view_scene.templates
+    assert "カメラに何が映っている" in view_scene.templates
+    assert view_scene.threshold == 0.90
+    assert view_scene.allow_middle is False
 
 
 def test_move_sequence_keeps_opposite_directions():

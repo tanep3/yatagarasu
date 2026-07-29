@@ -256,7 +256,7 @@ YATAGARASU_INTENT_MOVE_UP="上を向いて|上を見て|上に向けて|カメ�
 YATAGARASU_INTENT_MOVE_DOWN="下を向いて|下を見て|下に向けて|カメラを下|下側を見て"
 YATAGARASU_INTENT_MOVE_CALIBRATE="キャリブレーションして|カメラを初期化して|カメラの位置を直して|位置合わせして"
 
-YATAGARASU_INTENT_VIEW_SCENE="今何が見える|何が見える|見えているものを説明して|周りを見て|状況を教えて"
+YATAGARASU_INTENT_VIEW_SCENE="今何が見える|何が見える|見えているものを説明して|周りを見て|カメラに何が映っている|目の前の様子を教えて"
 YATAGARASU_INTENT_VIEW_FACE="僕の顔を見て|顔を見て|表情を見て|こっちを見て|私の顔を確認して"
 YATAGARASU_INTENT_VIEW_OBJECT="これを見て|これ何|この物を見て|手元を見て|見せているものを確認して"
 YATAGARASU_INTENT_VIEW_DOCUMENT_READ="この書類を読んで|何が書いてある|文章を読んで|内容を教えて|これ読める"

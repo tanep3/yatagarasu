@@ -184,10 +184,12 @@ def test_dispatch_passes_original_text_as_memory_prompt(monkeypatch) -> None:
     service._dispatch(
         "Router内部の制御プロンプト",
         memory_text="元のユーザー発話",
+        skip_memory_recall=True,
     )
 
     assert captured["input"] == "Router内部の制御プロンプト"
     assert captured["env"]["YATAGARASU_MEMORY_PROMPT"] == "元のユーザー発話"
+    assert captured["env"]["YATAGARASU_SKIP_MEMORY_RECALL"] == "true"
 
 
 def test_router_control_prompt_requires_view_image_for_captured_image() -> None:
@@ -210,6 +212,7 @@ def test_router_control_prompt_requires_view_image_for_captured_image() -> None:
     assert "必ず view_image Function Tool" in prompt
     assert "/tmp/yatagarasu-workspace/media/capture.jpg" in prompt
     assert "過去の記憶や推測で補わず" in prompt
+    assert "追加指示」に記載されていない依頼を実行または予告しない" in prompt
 
 
 def test_dispatch_logs_only_tagged_memory_warnings(monkeypatch, caplog) -> None:

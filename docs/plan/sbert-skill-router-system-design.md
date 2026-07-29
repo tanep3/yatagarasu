@@ -183,6 +183,7 @@ IntentDefinition(
     templates=["右を向いて", "右を見て", "右に向けて"],
     threshold=0.78,
     allow_multi_hit=True,
+    allow_middle=True,
     requires_llm=False,
     priority=10,
 )
@@ -505,6 +506,7 @@ class IntentDefinition:
     templates: tuple[str, ...]
     threshold: float
     allow_multi_hit: bool
+    allow_middle: bool
     requires_llm: bool
     priority: int
     llm_instruction: str
@@ -615,7 +617,7 @@ dispatch前:
 5. 方向抽出など語句ゲートを明示した Intent だけ、`gate_terms` が入力に含まれなければ候補から除外する
 6. Intent ごとに最高スコアのテンプレートを採用する
 7. `score >= high_threshold` を High とする
-8. `middle_threshold <= score < high_threshold` を Middle とする
+8. `allow_middle=True` の Intent だけ、`middle_threshold <= score < high_threshold` を Middle とする
 9. High hit をカテゴリごとの採用規則で整理する
 10. High hit から flags を構築する
 11. Middle hit は LLM 候補として保持する
@@ -625,6 +627,7 @@ dispatch前:
 
 - SBERT では表記ゆれを吸収したいため、原則として入力テキストの強い正規化はしない
 - `view_scene` のような単純な意味Intentは cosine similarity と閾値だけで判定し、`gate_terms` を設定しない。High 閾値を超えた意味一致をキーワード不一致で棄却してはならない
+- `view_scene` は天気・ニュース・予定などの一般質問との類似度が高くなりやすいため、専用 High 閾値 `0.90` を使い `allow_middle=False` とする。High 未満は Router 非該当として原文を LLM へ渡す
 - `gate_terms` は「右」と「左」のような対義方向から動作スロットを抽出する場合に限定する
 - 複合 Intent は `gate_required_groups` で「要約系 + 翻訳系」「転記系 + 翻訳系」のようなAND条件を持てる。これにより、単なる「翻訳して」が `文字起こしして和訳して` に誤分類されるのを防ぐ
 - Ruri v3 の prefix は Intent 判定では付けない。これは検索クエリ/検索文書ではなく、短文同士の意味類似度判定として扱うため
@@ -704,6 +707,11 @@ play "考えるね"
 self._dispatch(text)
 last_wake_ack_at 更新
 ```
+
+撮影画像を LLM へ渡す dispatch では、過去の画像説明が現在画像の認識を
+上書きしないよう SemanticMemory の自動リコールだけを停止する。現在の
+ユーザー発話と応答の保存は継続し、一般会話・Recall Intent の記憶処理は
+従来どおり維持する。
 
 ### 4.9 Skill 実行仕様
 

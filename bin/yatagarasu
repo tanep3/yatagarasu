@@ -65,6 +65,8 @@ CODEX_BYPASS_SANDBOX="${YATAGARASU_CODEX_BYPASS_SANDBOX:-false}"
 SPEAKER="${SPEAKER_ID:-68}"
 # SemanticMemory設定
 MEMORY_ENABLED="${YATAGARASU_MEMORY_ENABLED:-true}"
+SKIP_MEMORY_RECALL="${YATAGARASU_SKIP_MEMORY_RECALL:-false}"
+unset YATAGARASU_SKIP_MEMORY_RECALL
 CODEX_CMD=""
 CLAUDE_CMD=""
 OPENCODE_CMD=""
@@ -184,7 +186,7 @@ unset YATAGARASU_MEMORY_PROMPT
 
 # 記憶コンテキストを取得
 MEMORY_CONTEXT=""
-if [[ "$MEMORY_ENABLED" == "true" ]]; then
+if [[ "$MEMORY_ENABLED" == "true" && "$SKIP_MEMORY_RECALL" != "true" ]]; then
     if ! MEMORY_CONTEXT=$("$SCRIPT_DIR/recall-context.sh" "$MEMORY_PROMPT" 2>/dev/null); then
         echo "YATAGARASU_MEMORY_WARNING: SemanticMemoryから会話文脈を取得できませんでした。" >&2
         MEMORY_CONTEXT=""

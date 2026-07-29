@@ -634,6 +634,12 @@ class RouterExecutionResult:
     errors: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class PreparedDispatch:
+    text: str
+    skip_memory_recall: bool = False
+
+
 PTZ_ACTIONS = frozenset(
     {
         "move_camera_calibrate",
@@ -1703,13 +1709,17 @@ class ListendService:
         if not text:
             return False
         logging.info("dispatch session (%s): %s", reason, text)
-        dispatch_text = self._prepare_dispatch_text(text)
-        if dispatch_text is None:
+        prepared = self._prepare_dispatch(text)
+        if prepared is None:
             logging.info("dispatch completed by SBERT Router without LLM")
             return False
         if not self._play_wake_ack():
             logging.warning("wake ack was not completed before dispatch; continuing")
-        self._dispatch(dispatch_text, memory_text=text)
+        self._dispatch(
+            prepared.text,
+            memory_text=text,
+            skip_memory_recall=prepared.skip_memory_recall,
+        )
         # エージェント発話後のタイムスタンプを更新（ループ防止用）
         self.last_wake_ack_at = time.monotonic()
         self.last_system_audio_at = self.last_wake_ack_at
@@ -1957,24 +1967,27 @@ class ListendService:
         normalized = re.sub(r"[、。,.!！?？「」『』（）()\[\]{}\"'`]", "", normalized)
         return normalized
 
-    def _prepare_dispatch_text(self, text: str) -> str | None:
+    def _prepare_dispatch(self, text: str) -> PreparedDispatch | None:
         router = self.intent_router
         if router is None:
-            return text
+            return PreparedDispatch(text=text)
 
         decision = router.route(text)
         self._log_router_decision(decision)
         if not decision.has_router_hit:
-            return text
+            return PreparedDispatch(text=text)
 
         if decision.dry_run:
             logging.info("SBERT Router dry-run; dispatching original text")
-            return text
+            return PreparedDispatch(text=text)
 
         result = self._execute_router_decision(decision)
         if result.completed_without_llm:
             return None
-        return self._build_router_control_prompt(decision, result)
+        return PreparedDispatch(
+            text=self._build_router_control_prompt(decision, result),
+            skip_memory_recall=result.image_path is not None,
+        )
 
     def _log_router_decision(self, decision: RouterDecision) -> None:
         high = ", ".join(
@@ -2201,6 +2214,8 @@ class ListendService:
         recall_text = result.recall_text or "(なし)"
         return f"""以下は SBERT Skill Router による前処理結果です。
 実行済みの操作を再実行しないでください。
+元のユーザー入力は Intent 判定根拠の参照情報です。
+「追加指示」に記載されていない依頼を実行または予告しないでください。
 
 元のユーザー入力:
 {decision.original_text}
@@ -2227,7 +2242,13 @@ Middle判定のIntent候補:
 {instructions}
 """.strip()
 
-    def _dispatch(self, text: str, *, memory_text: str | None = None) -> None:
+    def _dispatch(
+        self,
+        text: str,
+        *,
+        memory_text: str | None = None,
+        skip_memory_recall: bool = False,
+    ) -> None:
         argv = shlex.split(self.settings.dispatch_cmd)
         if not argv:
             logging.error("dispatch command is empty")
@@ -2237,6 +2258,8 @@ Middle判定のIntent候補:
         env["YATAGARASU_CWD"] = str(self.settings.workspace_path)
         if memory_text:
             env["YATAGARASU_MEMORY_PROMPT"] = memory_text
+        if skip_memory_recall:
+            env["YATAGARASU_SKIP_MEMORY_RECALL"] = "true"
         started = time.monotonic()
 
         try:

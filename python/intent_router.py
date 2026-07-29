@@ -89,6 +89,7 @@ class IntentDefinition:
     requires_llm: bool
     priority: int
     llm_instruction: str
+    allow_middle: bool = True
     gate_terms: tuple[str, ...] = ()
     gate_required_groups: tuple[tuple[str, ...], ...] = ()
 
@@ -238,7 +239,8 @@ class IntentRouter:
         middle_hits = tuple(
             hit
             for hit in best_by_intent
-            if self.settings.middle_threshold <= hit.score < self._threshold_for(hit.intent_id)
+            if self._allows_middle(hit.intent_id)
+            and self.settings.middle_threshold <= hit.score < self._threshold_for(hit.intent_id)
         )
         top_hits = tuple(
             sorted(best_by_intent, key=lambda hit: hit.score, reverse=True)[
@@ -267,6 +269,12 @@ class IntentRouter:
             if intent.intent_id == intent_id:
                 return intent.threshold
         return self.settings.high_threshold
+
+    def _allows_middle(self, intent_id: str) -> bool:
+        for intent in self.intents:
+            if intent.intent_id == intent_id:
+                return intent.allow_middle
+        return True
 
     def _best_hits_by_intent(
         self, scores: np.ndarray, original_text: str
@@ -356,6 +364,7 @@ def intent(
     llm_instruction: str = "",
     threshold: float | None = None,
     allow_multi_hit: bool = True,
+    allow_middle: bool = True,
     gate_terms: tuple[str, ...] = (),
     gate_required_groups: tuple[tuple[str, ...], ...] = (),
 ) -> IntentDefinition:
@@ -370,6 +379,7 @@ def intent(
         requires_llm=requires_llm,
         priority=priority,
         llm_instruction=llm_instruction,
+        allow_middle=allow_middle,
         gate_terms=gate_terms,
         gate_required_groups=gate_required_groups,
     )
@@ -445,10 +455,12 @@ def build_intents_from_env(settings: RouterSettings) -> tuple[IntentDefinition, 
             "view",
             "capture_image",
             "YATAGARASU_INTENT_VIEW_SCENE",
-            "今何が見える|何が見える|見えているものを説明して|周りを見て|状況を教えて",
+            "今何が見える|何が見える|見えているものを説明して|周りを見て|カメラに何が映っている|目の前の様子を教えて",
             True,
             40,
             "撮影画像を見て、画像全体の状況と見えているものを短く説明してください。",
+            threshold=max(settings.high_threshold, 0.90),
+            allow_middle=False,
         ),
         intent(
             settings,

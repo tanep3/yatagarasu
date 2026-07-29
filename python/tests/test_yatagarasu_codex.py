@@ -182,6 +182,63 @@ printf 'agent-response' > "$output_file"
     assert memory_env_capture.read_text() == ""
 
 
+def test_current_image_dispatch_skips_memory_recall(tmp_path: Path) -> None:
+    app_root = tmp_path / "app"
+    bin_dir = app_root / "bin"
+    workspace = app_root / "workspace"
+    fake_path = tmp_path / "fake-path"
+    bin_dir.mkdir(parents=True)
+    workspace.mkdir()
+    fake_path.mkdir()
+
+    shutil.copy2(PROJECT_ROOT / "bin" / "yatagarasu", bin_dir / "yatagarasu")
+    write_executable(bin_dir / "zunda", "#!/bin/bash\ncat\n")
+    write_executable(bin_dir / "tapovoice", "#!/bin/bash\ncat >/dev/null\n")
+    write_executable(
+        bin_dir / "recall-context.sh",
+        "#!/bin/bash\ntouch \"$RECALL_CALLED\"\nprintf 'must-not-be-used\\n'\n",
+    )
+    write_executable(bin_dir / "memorize.sh", "#!/bin/bash\nexit 0\n")
+    write_executable(
+        fake_path / "codex",
+        """#!/bin/bash
+output_file=""
+while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "-o" ]]; then
+        output_file="$2"
+        shift 2
+    else
+        shift
+    fi
+done
+printf 'image-response' > "$output_file"
+""",
+    )
+
+    recall_called = tmp_path / "recall-called"
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{fake_path}:{env['PATH']}",
+            "YATAGARASU_ENGINE": "codex",
+            "YATAGARASU_MEMORY_ENABLED": "true",
+            "YATAGARASU_SKIP_MEMORY_RECALL": "true",
+            "RECALL_CALLED": str(recall_called),
+        }
+    )
+
+    subprocess.run(
+        [str(bin_dir / "yatagarasu"), "画像を確認してください"],
+        cwd=workspace,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert not recall_called.exists()
+
+
 def test_recall_context_accepts_preloaded_systemd_environment(
     tmp_path: Path,
 ) -> None:
