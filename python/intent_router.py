@@ -449,7 +449,6 @@ def build_intents_from_env(settings: RouterSettings) -> tuple[IntentDefinition, 
             True,
             40,
             "撮影画像を見て、画像全体の状況と見えているものを短く説明してください。",
-            gate_terms=("見える", "周り", "状況", "確認", "見て"),
         ),
         intent(
             settings,

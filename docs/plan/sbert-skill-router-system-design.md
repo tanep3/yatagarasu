@@ -612,7 +612,7 @@ dispatch前:
 2. 入力 embedding とテンプレート embedding を単位ベクトルに normalize する
 3. normalize 済み embedding 同士の dot product を取り、cosine similarity として扱う
 4. 判定補助用にだけ、入力テキストを NFKC・小文字化・カタカナひらがな寄せ・句読点除去で軽く正規化する
-5. Intent ごとの `gate_terms` が入力に含まれない場合、その Intent は候補から除外する
+5. 方向抽出など語句ゲートを明示した Intent だけ、`gate_terms` が入力に含まれなければ候補から除外する
 6. Intent ごとに最高スコアのテンプレートを採用する
 7. `score >= high_threshold` を High とする
 8. `middle_threshold <= score < high_threshold` を Middle とする
@@ -624,7 +624,8 @@ dispatch前:
 注意:
 
 - SBERT では表記ゆれを吸収したいため、原則として入力テキストの強い正規化はしない
-- `gate_terms` は SBERT を置き換えるルールベース処理ではなく、「右」と「左」のような対義方向や、汎用的な近傍語による誤爆を抑える軽い安全弁として扱う
+- `view_scene` のような単純な意味Intentは cosine similarity と閾値だけで判定し、`gate_terms` を設定しない。High 閾値を超えた意味一致をキーワード不一致で棄却してはならない
+- `gate_terms` は「右」と「左」のような対義方向から動作スロットを抽出する場合に限定する
 - 複合 Intent は `gate_required_groups` で「要約系 + 翻訳系」「転記系 + 翻訳系」のようなAND条件を持てる。これにより、単なる「翻訳して」が `文字起こしして和訳して` に誤分類されるのを防ぐ
 - Ruri v3 の prefix は Intent 判定では付けない。これは検索クエリ/検索文書ではなく、短文同士の意味類似度判定として扱うため
 - Score は cosine similarity に統一する。ベクトル距離は閾値調整が直感的でないため初期実装では使わない

@@ -16,7 +16,7 @@ class KeywordEmbedder:
         "左",
         "上",
         "下",
-        "見える",
+        "__view__",
         "覚えて",
         "書類",
         "要約",
@@ -26,7 +26,14 @@ class KeywordEmbedder:
     def encode(self, texts):
         rows = []
         for text in texts:
-            row = np.array([1.0 if feature in text else 0.0 for feature in self.features])
+            row = np.array(
+                [
+                    1.0
+                    if ("見え" in text if feature == "__view__" else feature in text)
+                    else 0.0
+                    for feature in self.features
+                ]
+            )
             norm = np.linalg.norm(row)
             if norm > 0:
                 row = row / norm
@@ -69,6 +76,15 @@ def test_move_and_view_requires_llm_with_deduped_capture():
     assert "move_camera_down" not in decision.flags
     assert decision.flags.count("capture_image") == 1
     assert decision.requires_llm is True
+
+
+def test_colloquial_view_scene_conjugations_trigger_capture():
+    for text in ("今何が見えてる", "今何が見えている", "何が見えますか"):
+        decision = router().route(text)
+
+        assert decision.flags == ("capture_image",)
+        assert decision.requires_llm is True
+        assert decision.high_hits[0].intent_id == "view_scene"
 
 
 def test_move_sequence_keeps_opposite_directions():

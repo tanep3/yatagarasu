@@ -8,7 +8,7 @@ import numpy as np
 
 from audio_prompt import PromptStatus
 from listen_state import ListenSession, ListenState, SessionAction, SessionDecision
-from listend import ListendService
+from listend import ListendService, RouterExecutionResult
 from wake_latency import WakeLatencyTracker
 from wakeword import WakeActivityGate, WakeDetection
 
@@ -188,6 +188,28 @@ def test_dispatch_passes_original_text_as_memory_prompt(monkeypatch) -> None:
 
     assert captured["input"] == "Router内部の制御プロンプト"
     assert captured["env"]["YATAGARASU_MEMORY_PROMPT"] == "元のユーザー発話"
+
+
+def test_router_control_prompt_requires_view_image_for_captured_image() -> None:
+    service, _, _ = new_service()
+    decision = SimpleNamespace(
+        original_text="今何が見えてる",
+        middle_hits=(),
+        llm_instructions=("撮影画像に見えるものを説明してください。",),
+    )
+    result = RouterExecutionResult(
+        completed_without_llm=False,
+        executed_actions=(),
+        image_path="/tmp/yatagarasu-workspace/media/capture.jpg",
+        recall_text=None,
+        errors=(),
+    )
+
+    prompt = service._build_router_control_prompt(decision, result)
+
+    assert "必ず view_image Function Tool" in prompt
+    assert "/tmp/yatagarasu-workspace/media/capture.jpg" in prompt
+    assert "過去の記憶や推測で補わず" in prompt
 
 
 def test_dispatch_logs_only_tagged_memory_warnings(monkeypatch, caplog) -> None:

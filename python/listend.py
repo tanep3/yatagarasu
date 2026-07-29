@@ -2191,6 +2191,13 @@ class ListendService:
         ) or "- 元のユーザー入力に答えてください。"
         errors = "\n".join(f"- {error}" for error in result.errors) or "(なし)"
         image_path = result.image_path or "(なし)"
+        image_instruction = (
+            "回答する前に、必ず view_image Function Tool で上記の絶対パスを"
+            "読み取ってください。画像を読み取れない場合は、過去の記憶や推測で"
+            "補わず、画像を確認できなかったと回答してください。"
+            if result.image_path
+            else "(画像なし)"
+        )
         recall_text = result.recall_text or "(なし)"
         return f"""以下は SBERT Skill Router による前処理結果です。
 実行済みの操作を再実行しないでください。
@@ -2203,6 +2210,9 @@ class ListendService:
 
 撮影画像:
 {image_path}
+
+画像確認手順:
+{image_instruction}
 
 記憶検索結果:
 {recall_text}
