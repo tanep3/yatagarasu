@@ -1003,7 +1003,6 @@ fake clockを使用し、実時間sleepを使わない。
 - 既存SBERT Skill RouterとLLM dispatchが動く
 - 追加CPU使用率5 percentage points以下を実機目標として測定する
 - 検出率と誤検出率の受け入れ条件を満たす
-- 音響的に近い語句のモデル誤検出は、所有者が承認した既知の制約として扱う
 - doctorと文書で既存環境を安全に更新できる
 
 ## 24. 実機で確定した値
