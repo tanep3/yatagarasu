@@ -53,6 +53,7 @@ from wakeword import (
     WakeActivityGate,
     WakeBackend,
 )
+from wake_latency import WakeLatencyTracker, elapsed_ms, format_ms
 
 DEFAULT_AUDIO_FILTER = "highpass=f=120,lowpass=f=5000"
 DEFAULT_SEGMENT_END_SILENCE_CHUNKS = 5
@@ -236,6 +237,12 @@ class WakeSettings:
     activity_rms_dbfs: float
     speech_hold_sec: float
     warmup_sec: float
+    lookahead_mode: str
+    lookahead_target_sec: float
+    lookahead_max_silence_sec: float
+    lookahead_silence_chunks: int
+    lookahead_trigger_score: float
+    lookahead_threshold: float
     prompt_audio_path: Path
     prompt_guard_sec: float
     prompt_timeout_sec: float
@@ -398,6 +405,16 @@ class ListendSettings:
             maximum=wake_threshold,
             minimum_inclusive=False,
         )
+        lookahead_mode = os.getenv(
+            "LISTEND_WAKE_LOOKAHEAD_MODE",
+            "off",
+        ).strip().lower()
+        if lookahead_mode not in {"off", "shadow", "active"}:
+            raise ValueError(
+                "LISTEND_WAKE_LOOKAHEAD_MODE must be "
+                "'off', 'shadow', or 'active': "
+                f"{lookahead_mode}"
+            )
         wake_settings = WakeSettings(
             backend=wake_backend,
             model_path=resolve_wake_path(
@@ -438,13 +455,45 @@ class ListendSettings:
                 minimum=0.0,
                 maximum=2.0,
             ),
+            lookahead_mode=lookahead_mode,
+            lookahead_target_sec=env_float_strict(
+                "LISTEND_WAKE_LOOKAHEAD_TARGET_SEC",
+                2.0,
+                minimum=0.08,
+                maximum=2.0,
+            ),
+            lookahead_max_silence_sec=env_float_strict(
+                "LISTEND_WAKE_LOOKAHEAD_MAX_SILENCE_SEC",
+                1.5,
+                minimum=0.08,
+                maximum=1.5,
+            ),
+            lookahead_silence_chunks=env_int_strict(
+                "LISTEND_WAKE_LOOKAHEAD_SILENCE_CHUNKS",
+                2,
+                minimum=1,
+            ),
+            lookahead_trigger_score=env_float_strict(
+                "LISTEND_WAKE_LOOKAHEAD_TRIGGER_SCORE",
+                0.10,
+                minimum=0.0,
+                maximum=wake_threshold,
+                minimum_inclusive=False,
+            ),
+            lookahead_threshold=env_float_strict(
+                "LISTEND_WAKE_LOOKAHEAD_THRESHOLD",
+                0.55,
+                minimum=0.0,
+                maximum=1.0,
+                minimum_inclusive=False,
+            ),
             prompt_audio_path=resolve_wake_path(
                 "LISTEND_WAKE_PROMPT_AUDIO",
                 workspace_path.parent / "assets" / "audio" / "wake_prompt_hai.mp3",
             ),
             prompt_guard_sec=env_float_strict(
                 "LISTEND_WAKE_PROMPT_GUARD_SEC",
-                0.6,
+                0.8,
                 minimum=0.0,
             ),
             prompt_timeout_sec=env_float_strict(
@@ -749,6 +798,9 @@ class ListendService:
         self._wake_suppressed = False
         self._wake_rms_active = False
         self._reset_audio_input_after_dispatch = False
+        self.wake_latency = WakeLatencyTracker(
+            activity_hold_sec=settings.wake.speech_hold_sec
+        )
 
         self.vad_model = load_silero_vad()
         self.whisper_model: WhisperModel | None = None
@@ -789,6 +841,12 @@ class ListendService:
             idle_interval_sec=wake.idle_interval_sec,
             speech_hold_sec=wake.speech_hold_sec,
             warmup_sec=wake.warmup_sec,
+            lookahead_mode=wake.lookahead_mode,
+            lookahead_target_sec=wake.lookahead_target_sec,
+            lookahead_max_silence_sec=wake.lookahead_max_silence_sec,
+            lookahead_silence_chunks=wake.lookahead_silence_chunks,
+            lookahead_trigger_score=wake.lookahead_trigger_score,
+            lookahead_threshold=wake.lookahead_threshold,
         )
 
     def _init_stt_backend(self) -> None:
@@ -1212,6 +1270,16 @@ class ListendService:
                 pcm,
                 vad_speech=has_speech,
             )
+            activity_source = "vad" if has_speech else "rms"
+            if self.wake_latency.observe_activity(
+                now=now,
+                active=wake_activity,
+                source=activity_source,
+            ):
+                logging.debug(
+                    "wake latency event=activity_start source=%s",
+                    activity_source,
+                )
             rms_accelerated = wake_activity and not has_speech
             if rms_accelerated and not self._wake_rms_active:
                 logging.debug(
@@ -1227,12 +1295,67 @@ class ListendService:
             )
             detection = self.wake_backend.poll(now=now)
             if detection is not None:
+                trace = self.wake_latency.on_detection(
+                    detection,
+                    observed_at=now,
+                )
                 logging.info(
-                    "wake detected model=%s score=%.4f threshold=%.4f trigger=%s",
+                    (
+                        "wake detected trace=%s model=%s score=%.4f "
+                        "threshold=%.4f trigger=%s"
+                    ),
+                    trace.trace_id,
                     detection.model_name,
                     detection.score,
                     detection.threshold,
                     detection.trigger,
+                )
+                logging.info(
+                    (
+                        "wake latency trace=%s event=detected source=%s "
+                        "activity_to_capture_ms=%s candidate_to_capture_ms=%s "
+                        "capture_to_result_ms=%s result_to_poll_ms=%s "
+                        "inference_ms=%.1f lookahead_probe_score=%s "
+                        "probe_to_detection_ms=%s"
+                    ),
+                    trace.trace_id,
+                    trace.activity_source,
+                    format_ms(
+                        elapsed_ms(
+                            trace.activity_started_at,
+                            trace.inference_captured_at,
+                        )
+                    ),
+                    format_ms(
+                        elapsed_ms(
+                            trace.first_candidate_at,
+                            trace.inference_captured_at,
+                        )
+                    ),
+                    format_ms(
+                        elapsed_ms(
+                            trace.inference_captured_at,
+                            trace.inference_completed_at,
+                        )
+                    ),
+                    format_ms(
+                        elapsed_ms(
+                            trace.inference_completed_at,
+                            trace.detection_observed_at,
+                        )
+                    ),
+                    trace.inference_elapsed_sec * 1000.0,
+                    (
+                        "n/a"
+                        if detection.lookahead_probe_score is None
+                        else f"{detection.lookahead_probe_score:.4f}"
+                    ),
+                    format_ms(
+                        elapsed_ms(
+                            detection.lookahead_probe_at,
+                            detection.detected_at,
+                        )
+                    ),
                 )
                 self._apply_session_decision(self.session.on_livekit_wake(now), now)
             return
@@ -1247,6 +1370,7 @@ class ListendService:
         self._handled_prompt_status = PromptStatus.IDLE
         self._wake_suppressed = False
         self._wake_rms_active = False
+        self.wake_latency.reset()
         if decision.action is not SessionAction.NONE:
             logging.info("state transition: -> OFF (%s)", decision.reason)
 
@@ -1295,10 +1419,12 @@ class ListendService:
         if status is not self._handled_prompt_status:
             self._handled_prompt_status = status
             if status is PromptStatus.SUCCEEDED:
+                self._log_prompt_terminal(now, status)
                 logging.info("wake prompt sent; guard started")
                 decision = self.session.on_prompt_succeeded(now)
                 self._apply_session_decision(decision, now)
             elif status in {PromptStatus.FAILED, PromptStatus.TIMED_OUT}:
+                self._log_prompt_terminal(now, status)
                 logging.warning("wake prompt %s; entering command mode", status.value)
                 decision = self.session.on_prompt_failed(
                     now,
@@ -1311,6 +1437,52 @@ class ListendService:
             has_pending_text=bool(self.session_text_chunks),
         )
         self._apply_session_decision(decision, now)
+
+    def _log_prompt_terminal(
+        self,
+        now: float,
+        status: PromptStatus,
+    ) -> None:
+        self.wake_latency.on_prompt_terminal(
+            now=now,
+            status=status.value,
+        )
+        trace = self.wake_latency.current
+        if trace is None:
+            return
+        event = (
+            "prompt_submit_completed"
+            if status is PromptStatus.SUCCEEDED
+            else "prompt_terminal"
+        )
+        logging.info(
+            (
+                "wake latency trace=%s event=%s status=%s "
+                "process_ms=%s detect_to_terminal_ms=%s "
+                "activity_to_terminal_ms=%s"
+            ),
+            trace.trace_id,
+            event,
+            status.value,
+            format_ms(
+                elapsed_ms(
+                    trace.prompt_process_started_at,
+                    trace.prompt_terminal_at,
+                )
+            ),
+            format_ms(
+                elapsed_ms(
+                    trace.detection_observed_at,
+                    trace.prompt_terminal_at,
+                )
+            ),
+            format_ms(
+                elapsed_ms(
+                    trace.activity_started_at,
+                    trace.prompt_terminal_at,
+                )
+            ),
+        )
 
     def _apply_session_decision(
         self,
@@ -1326,14 +1498,44 @@ class ListendService:
             self.wake_backend.reset_audio()
             self._handled_prompt_status = PromptStatus.RUNNING
             logging.info("state transition: OFF -> WAKING (%s)", decision.reason)
+            self.wake_latency.on_prompt_start_requested(now=now)
             try:
                 self.prompt_player.start(
                     self.settings.wake.prompt_audio_path,
                     now=now,
                 )
+                process_started_at = time.monotonic()
+                self.wake_latency.on_prompt_process_started(
+                    now=process_started_at
+                )
+                trace = self.wake_latency.current
+                if trace is not None:
+                    logging.info(
+                        (
+                            "wake latency trace=%s event=prompt_process_started "
+                            "detect_to_start_ms=%s popen_ms=%s"
+                        ),
+                        trace.trace_id,
+                        format_ms(
+                            elapsed_ms(
+                                trace.detection_observed_at,
+                                trace.prompt_process_started_at,
+                            )
+                        ),
+                        format_ms(
+                            elapsed_ms(
+                                trace.prompt_start_requested_at,
+                                trace.prompt_process_started_at,
+                            )
+                        ),
+                    )
             except Exception as exc:
                 logging.warning("wake prompt failed to start: %s", exc)
                 self._handled_prompt_status = PromptStatus.FAILED
+                self._log_prompt_terminal(
+                    time.monotonic(),
+                    PromptStatus.FAILED,
+                )
                 fallback = self.session.on_prompt_failed(
                     now,
                     "wake prompt start failed",
@@ -1350,6 +1552,7 @@ class ListendService:
             self.prompt_player.close()
             self._reset_audio_session()
             self.wake_backend.reset_audio()
+            self.wake_latency.reset()
             logging.info("state transition: -> OFF (%s)", decision.reason)
             if "stop word detected" in decision.reason:
                 self._play_standby_word()
@@ -2336,7 +2539,9 @@ def main() -> int:
         (
             "wake_backend=%s model=%s threshold=%.3f debounce_sec=%.2f "
             "early=%.3fx%d interval_sec=%.2f/%.2f "
-            "activity_rms_dbfs=%.1f warmup_sec=%.2f"
+            "activity_rms_dbfs=%.1f warmup_sec=%.2f "
+            "lookahead=%s target=%.2fs max=%.2fs "
+            "%dchunks trigger=%.3f threshold=%.3f"
         ),
         settings.wake.backend,
         settings.wake.model_path,
@@ -2348,6 +2553,12 @@ def main() -> int:
         settings.wake.idle_interval_sec,
         settings.wake.activity_rms_dbfs,
         settings.wake.warmup_sec,
+        settings.wake.lookahead_mode,
+        settings.wake.lookahead_target_sec,
+        settings.wake.lookahead_max_silence_sec,
+        settings.wake.lookahead_silence_chunks,
+        settings.wake.lookahead_trigger_score,
+        settings.wake.lookahead_threshold,
     )
     logging.info(
         "wake_prompt=%s guard_sec=%.2f timeout_sec=%.2f",

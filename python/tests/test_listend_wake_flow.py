@@ -9,6 +9,7 @@ import numpy as np
 from audio_prompt import PromptStatus
 from listen_state import ListenSession, ListenState, SessionAction, SessionDecision
 from listend import ListendService
+from wake_latency import WakeLatencyTracker
 from wakeword import WakeActivityGate, WakeDetection
 
 
@@ -79,6 +80,7 @@ def new_service() -> tuple[ListendService, FakeWakeBackend, FakePromptPlayer]:
     service._wake_suppressed = False
     service._wake_rms_active = False
     service._reset_audio_input_after_dispatch = False
+    service.wake_latency = WakeLatencyTracker(activity_hold_sec=2.0)
     service._has_speech = lambda pcm: True
     service._feed_segment = lambda *args, **kwargs: (_ for _ in ()).throw(
         AssertionError("STT segment path must not run while OFF/livekit")
@@ -108,6 +110,9 @@ def test_livekit_detection_starts_prompt_then_enters_on(monkeypatch) -> None:
         score=0.8,
         threshold=0.6,
         detected_at=1.0,
+        first_candidate_at=0.92,
+        inference_completed_at=1.01,
+        inference_elapsed_sec=0.01,
     )
     monkeypatch.setattr("listend.time.monotonic", lambda: 1.0)
 

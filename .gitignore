@@ -37,6 +37,7 @@ Thumbs.db
 # プロジェクト固有
 media/*
 oldcontents/
+workspace/work/*
 
 # 環境変数（※.env は ignore、env.exampleをコピーして使う）
 .env

@@ -62,6 +62,11 @@ dispatch完了後に無活動タイマーをリセットする。
 
 LiveKitの`WakeWordModel.predict()`はstatelessであり、呼び出しごとに約2秒の
 音声窓全体からmel spectrogramとspeech embeddingを再計算する。
+Yatagarasuでは連続する音声窓の重複をPCMサンプル単位で検証し、直前と同一の
+speech embeddingを再利用する。80ms更新時は16個中15個を再利用し、新しい1個だけを
+計算する。音声が不連続、窓サイズが変化、または重複を確認できない場合は、
+キャッシュを使用せず全件を再計算する。mel spectrogramとclassifierは毎回計算し、
+推論スコアの意味および判定閾値は変更しない。
 
 Silero VADに連動した推論間隔を採用し、active推論は発話中だけに限定する。
 
@@ -73,6 +78,32 @@ Silero VADに連動した推論間隔を採用し、active推論は発話中だ�
 発話開始はSilero VADを主判定とし、VADが短い呼びかけを逃した場合に限って
 RMS音量gateを補助判定として使用する。補助判定はschedulerへのactive通知だけに
 作用し、命令録音とSTTのVAD状態には作用しない。
+
+無音先読みは`LISTEND_WAKE_LOOKAHEAD_MODE=active`を標準とする。
+音声活動終了後、設定した連続無音チャンクを確認した時点で、現在の2秒窓を前へずらし、
+末尾へ不足分の仮想無音を追加して即時判定する。
+
+補完量は壁時計ではなく16kHz音声のサンプル数から算出する。
+
+```text
+observed_samples =
+  VAD発話開始チャンク先頭から無音確定チャンク末尾までのsample数
+
+silence_samples = clamp(
+  target_samples - observed_samples,
+  0,
+  max_silence_samples
+)
+```
+
+VAD起点は補完済み窓のscoreがlookahead threshold以上なら検出する。
+VADなしで通常scoreの上昇から先読みする場合だけ、現在scoreがtrigger threshold以上、
+かつ補完scoreがlookahead threshold以上という二重条件を適用する。
+`shadow`は補完scoreと将来の通常scoreを比較する診断用途として維持する。
+
+VAD補完要求は通常推論要求より優先してpendingへ保持する。未受領のVAD補完結果も
+通常推論結果では上書きしない。同じgenerationの新しい補完要求は古い補完要求を
+置き換え、generation変更後の要求は常に古い要求を置き換える。
 
 上流実装:
 
@@ -622,8 +653,14 @@ class WakeSettings:
 | `LISTEND_WAKE_ACTIVITY_RMS_DBFS` | float | `-50.0` | `-120.0 <= value <= 0.0` |
 | `LISTEND_WAKE_SPEECH_HOLD_SEC` | float | `2.0` | `>= 0` |
 | `LISTEND_WAKE_WARMUP_SEC` | float | `0.0` | `0.0 <= value <= 2.0` |
+| `LISTEND_WAKE_LOOKAHEAD_MODE` | str | `active` | `off / shadow / active` |
+| `LISTEND_WAKE_LOOKAHEAD_TARGET_SEC` | float | `2.0` | `0.08 <= value <= 2.0` |
+| `LISTEND_WAKE_LOOKAHEAD_MAX_SILENCE_SEC` | float | `1.5` | `0.08 <= value <= 1.5` |
+| `LISTEND_WAKE_LOOKAHEAD_SILENCE_CHUNKS` | int | `2` | `>= 1` |
+| `LISTEND_WAKE_LOOKAHEAD_TRIGGER_SCORE` | float | `0.10` | `0.0 < value <= threshold` |
+| `LISTEND_WAKE_LOOKAHEAD_THRESHOLD` | float | `0.55` | `0.0 < value <= 1.0` |
 | `LISTEND_WAKE_PROMPT_AUDIO` | path | 同梱MP3 | readable file |
-| `LISTEND_WAKE_PROMPT_GUARD_SEC` | float | `0.6` | `>= 0` |
+| `LISTEND_WAKE_PROMPT_GUARD_SEC` | float | `0.8` | `>= 0` |
 | `LISTEND_WAKE_PROMPT_TIMEOUT_SEC` | float | `2.0` | `> 0` |
 | `LISTEND_SESSION_END_SILENCE_SEC` | float | `3.0` | `> 0` |
 | `LISTEND_SILENCE_TIMEOUT_SEC` | float | `3.0` | `> 0` |
@@ -755,9 +792,18 @@ ONNX fatal errorをRTSP再接続エラーとして扱わない。audio loopの�
 - prompt絶対path / guard
 - Provider
 - wake検出score
+- wake trace ID
+- activity開始から推論対象窓取得までの時間
+- 最初のcandidateから検出対象窓取得までの時間
+- 推論対象窓取得、推論完了、main loop受領の各区間時間
+- prompt process起動時間とtapovoice送信処理完了時間
 - `OFF -> WAKING -> ON`
 - prompt process結果
 - session timeout
+
+prompt processの成功はgo2rtc APIへの送信処理完了を示し、カメラスピーカーからの
+実再生開始を示さない。ログ上は`prompt_submit_completed`として区別する。
+同一のウェイク処理にはserviceプロセス内で単調増加するtrace IDを付与する。
 
 ### 18.2 DEBUG
 
@@ -822,6 +868,10 @@ doctorは音声を実際にカメラへ再生しない。
 - RMS補助判定が命令STTのVAD状態を変更しない
 - 発話終了後2秒はactive interval
 - worker実行中のpendingが最新要求へ置換される
+- VAD補完要求が通常推論要求で上書きされない
+- 補完量が壁時計ではなく音声sample数から算出される
+- VAD起点は補完scoreだけで判定する
+- score起点は現在scoreと補完scoreの二重条件で判定する
 - drop countが増える
 - generation変更前のresultを破棄する
 - threshold未満では検出しない
@@ -965,7 +1015,11 @@ fake clockを使用し、実時間sleepを使わない。
 - idle interval: `1.5`
 - speech hold: `2.0`
 - warmup: `0.0`
-- prompt guard: `0.6`
+- lookahead mode: `active`
+- lookahead target / max silence: `2.0 / 1.5`
+- lookahead silence chunks: `2`
+- lookahead trigger / threshold: `0.10 / 0.55`
+- prompt guard: `0.8`
 - prompt timeout: `2.0`
 - session end silence: `3.0`
 - session timeout: `3.0`

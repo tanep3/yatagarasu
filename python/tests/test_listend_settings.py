@@ -20,6 +20,12 @@ WAKE_ENV_NAMES = (
     "LISTEND_WAKE_ACTIVITY_RMS_DBFS",
     "LISTEND_WAKE_SPEECH_HOLD_SEC",
     "LISTEND_WAKE_WARMUP_SEC",
+    "LISTEND_WAKE_LOOKAHEAD_MODE",
+    "LISTEND_WAKE_LOOKAHEAD_TARGET_SEC",
+    "LISTEND_WAKE_LOOKAHEAD_MAX_SILENCE_SEC",
+    "LISTEND_WAKE_LOOKAHEAD_SILENCE_CHUNKS",
+    "LISTEND_WAKE_LOOKAHEAD_TRIGGER_SCORE",
+    "LISTEND_WAKE_LOOKAHEAD_THRESHOLD",
     "LISTEND_WAKE_PROMPT_AUDIO",
     "LISTEND_WAKE_PROMPT_GUARD_SEC",
     "LISTEND_WAKE_PROMPT_TIMEOUT_SEC",
@@ -62,7 +68,11 @@ def test_livekit_is_default_backend(monkeypatch, tmp_path: Path) -> None:
     assert settings.wake.activity_rms_dbfs == -50.0
     assert settings.wake.speech_hold_sec == 2.0
     assert settings.wake.warmup_sec == 0.0
-    assert settings.wake.prompt_guard_sec == 0.6
+    assert settings.wake.lookahead_trigger_score == 0.10
+    assert settings.wake.lookahead_threshold == 0.55
+    assert settings.wake.lookahead_target_sec == 2.0
+    assert settings.wake.lookahead_max_silence_sec == 1.5
+    assert settings.wake.prompt_guard_sec == 0.8
     assert settings.wake.prompt_timeout_sec == 2.0
     assert settings.silence_timeout_sec == 3.0
     assert settings.wake_ack_speaker_id == "13"
@@ -122,3 +132,15 @@ def test_early_threshold_must_not_exceed_normal_threshold(
 
     with pytest.raises(ValueError, match="LISTEND_WAKE_EARLY_THRESHOLD"):
         ListendSettings.from_env()
+
+
+def test_active_lookahead_mode_is_supported(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    configure_minimal_env(monkeypatch, tmp_path)
+    monkeypatch.setenv("LISTEND_WAKE_LOOKAHEAD_MODE", "active")
+
+    settings = ListendSettings.from_env()
+
+    assert settings.wake.lookahead_mode == "active"

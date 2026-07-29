@@ -232,7 +232,7 @@ LISTEND_WAKE_WARMUP_SEC="0.0"
 # 空なら同梱の青山龍星「はい」MP3を使用
 LISTEND_WAKE_PROMPT_AUDIO=""
 LISTEND_WAKE_PROMPT_WORD="はい"
-LISTEND_WAKE_PROMPT_GUARD_SEC="0.6"
+LISTEND_WAKE_PROMPT_GUARD_SEC="0.8"
 LISTEND_WAKE_PROMPT_TIMEOUT_SEC="2.0"
 
 # STT backend時の文字列ウェイク、および表示・ログ用
@@ -316,6 +316,7 @@ SPEAKER_ID="13"
 - 選択ウェイクバックエンド
 - 読み込んだモデル名と絶対パス
 - threshold、debounce、active/idle推論間隔
+- 無音補完のmode、target、最大補完量、判定閾値
 - ウェイク検出score
 - `OFF -> WAKING -> ON`遷移理由
 - フィードバック再生成否
