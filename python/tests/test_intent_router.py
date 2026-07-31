@@ -91,6 +91,20 @@ def test_colloquial_view_scene_conjugations_trigger_capture():
         assert decision.high_hits[0].intent_id == "view_scene"
 
 
+def test_direction_only_phrases_do_not_trigger_view_scene():
+    for text, expected_flag in (
+        ("右を向いて", "move_camera_right"),
+        ("右を見て", "move_camera_right"),
+        ("左を向いて", "move_camera_left"),
+        ("上を向いて", "move_camera_up"),
+        ("下を向いて", "move_camera_down"),
+    ):
+        decision = router().route(text)
+
+        assert decision.flags == (expected_flag,)
+        assert decision.requires_llm is False
+
+
 def test_view_scene_templates_are_visual_and_use_strict_threshold():
     view_scene = next(
         intent
@@ -102,6 +116,8 @@ def test_view_scene_templates_are_visual_and_use_strict_threshold():
     assert "カメラに何が映っている" in view_scene.templates
     assert view_scene.threshold == 0.90
     assert view_scene.allow_middle is False
+    assert "見え" in view_scene.gate_terms
+    assert "何が" in view_scene.gate_terms
 
 
 def test_move_sequence_keeps_opposite_directions():
